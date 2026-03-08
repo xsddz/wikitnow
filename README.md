@@ -157,6 +157,12 @@ wikitnow config show-ignore
 
 # 在当前目录生成 .wikitnow/ignore（内容来自系统默认）
 wikitnow config init-ignore
+
+# 强制覆盖已有文件
+wikitnow config init-ignore --force
+
+# 指定输出路径（如自定义用户全局配置）
+wikitnow config init-ignore --dest ~/.wikitnow/ignore
 ```
 
 ## 📝 开源协议

@@ -157,6 +157,12 @@ wikitnow config show-ignore
 
 # Generate .wikitnow/ignore in the current directory
 wikitnow config init-ignore
+
+# Force overwrite if file already exists
+wikitnow config init-ignore --force
+
+# Write to a custom path (e.g. user global config)
+wikitnow config init-ignore --dest ~/.wikitnow/ignore
 ```
 
 ## 📝 License

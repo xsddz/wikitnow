@@ -103,6 +103,9 @@ wikitnow config init-ignore
 
 # 强制覆盖已有文件
 wikitnow config init-ignore --force
+
+# 指定输出路径（如初始化用户全局配置）
+wikitnow config init-ignore --dest ~/.wikitnow/ignore
 ```
 
 ---
@@ -113,5 +116,5 @@ wikitnow config init-ignore --force
 |------|------|----------|
 | `~/.wikitnow/config.json` | 凭证与全局偏好 | `wikitnow auth setup` 或直接编辑 |
 | `<project>/.wikitnow/ignore` | 项目级排除规则 | `wikitnow config init-ignore` 或直接编辑 |
-| `~/.wikitnow/ignore` | 用户全局排除规则 | 直接编辑 |
+| `~/.wikitnow/ignore` | 用户全局排除规则 | `wikitnow config init-ignore --dest ~/.wikitnow/ignore` 或直接编辑 |
 | `/usr/local/etc/wikitnow/ignore` | 系统默认排除规则 | 随命令安装，可覆盖 |
