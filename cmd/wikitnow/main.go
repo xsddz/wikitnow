@@ -61,38 +61,63 @@ func main() {
 	}
 }
 
-// runSync 处理 sync 子命令
-func runSync(args []string) {
-	syncCmd := flag.NewFlagSet("sync", flag.ExitOnError)
-	var target string
-	var useCodeBlock bool
-	var debug bool
-	syncCmd.StringVar(&target, "target", "", "目标知识库 Wiki URL，指定后执行真实写入（不指定则为安全预览模式）")
-	syncCmd.BoolVar(&useCodeBlock, "code-block", true, "对于文本文件，是否将其内容使用代码块包裹插入（默认 true）。设为 false 则插入纯文本")
-	syncCmd.BoolVar(&debug, "debug", false, "调试模式：将每次 HTTP 请求的方法和 URL 打印到 stderr")
+// syncOpts 存放 sync 子命令解析后的全部参数。
+type syncOpts struct {
+	target       string
+	useCodeBlock bool
+	debug        bool
+	localPaths   []string
+}
 
-	// 为支持 flags 写在位置参数之后（如 sync ./docs --target URL），
-	// 预先将所有 flag 参数（-- 或 - 开头）重排到位置参数前面。
-	var flagArgs, posArgs []string
-	for _, a := range args {
-		if strings.HasPrefix(a, "-") {
-			flagArgs = append(flagArgs, a)
-		} else {
-			posArgs = append(posArgs, a)
+// parseSyncArgs 纯函数：将 sync 子命令的原始参数切片解析为 syncOpts。
+// flags 与位置参数（本地路径）可以任意混排；flag 格式支持：
+//
+//	--key value
+//	--key=value
+func parseSyncArgs(args []string) (*syncOpts, error) {
+	opts := &syncOpts{useCodeBlock: true}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--target" || a == "-target":
+			if i+1 >= len(args) {
+				return nil, errors.New("--target 需要一个参数值")
+			}
+			i++
+			opts.target = args[i]
+		case strings.HasPrefix(a, "--target="):
+			opts.target = strings.TrimPrefix(a, "--target=")
+		case strings.HasPrefix(a, "-target="):
+			opts.target = strings.TrimPrefix(a, "-target=")
+		case a == "--code-block=false" || a == "-code-block=false":
+			opts.useCodeBlock = false
+		case a == "--code-block=true" || a == "--code-block" || a == "-code-block=true" || a == "-code-block":
+			opts.useCodeBlock = true
+		case a == "--debug" || a == "-debug":
+			opts.debug = true
+		case strings.HasPrefix(a, "-"):
+			return nil, fmt.Errorf("未知参数: %s（用法: wikitnow sync <本地路径> [本地路径...] [--target <Wiki URL>] [--code-block=false]）", a)
+		default:
+			opts.localPaths = append(opts.localPaths, a)
 		}
 	}
-	syncCmd.Parse(append(flagArgs, posArgs...))
-	localPaths := syncCmd.Args()
+	if len(opts.localPaths) == 0 {
+		return nil, errors.New("必须提供至少一个本地路径")
+	}
+	return opts, nil
+}
 
-	if len(localPaths) < 1 {
-		fmt.Fprintln(os.Stderr, "❌ 错误: 必须提供 <本地路径>")
-		fmt.Fprintf(os.Stderr, "用法: wikitnow sync <本地路径> [本地路径...] [--target <Wiki URL>] [--code-block=false]\n")
+// runSync 处理 sync 子命令
+func runSync(args []string) {
+	opts, err := parseSyncArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ 错误: %v\n", err)
 		os.Exit(1)
 	}
 
-	apply := target != ""
+	apply := opts.target != ""
 	if apply {
-		if err := validateWikiURL(target); err != nil {
+		if err := validateWikiURL(opts.target); err != nil {
 			fmt.Fprintf(os.Stderr, "❌ --target 参数无效: %v\n", err)
 			os.Exit(1)
 		}
@@ -106,14 +131,14 @@ func runSync(args []string) {
 		fmt.Printf("⚠️  %v\n   运行 'wikitnow auth setup' 可快速完成配置\n   (本次仅预览本地文件树)\n", err)
 	}
 
-	client := feishu.NewClient(authManager, debug)
+	client := feishu.NewClient(authManager, opts.debug)
 	prov := feishuprov.NewProvider(client)
 
 	var parentNodeToken string
 	var spaceID string
 
 	if apply {
-		extractedSpace, extractedParent, err := prov.ExtractRoot(target)
+		extractedSpace, extractedParent, err := prov.ExtractRoot(opts.target)
 		if err != nil {
 			fmt.Printf("❌ 目标节点提取失败: %v\n", err)
 			os.Exit(1)
@@ -125,8 +150,8 @@ func runSync(args []string) {
 		fmt.Printf("📁 目标知识库 Space ID: %s\n\n", spaceID)
 	}
 
-	for _, localPath := range localPaths {
-		engine := sync.NewEngine(prov, localPath, !apply, useCodeBlock)
+	for _, localPath := range opts.localPaths {
+		engine := sync.NewEngine(prov, localPath, !apply, opts.useCodeBlock)
 		if err := engine.Sync(localPath, spaceID, parentNodeToken); err != nil {
 			fmt.Printf("❌ 同步中断 [%s]: %v\n", localPath, err)
 			os.Exit(1)
