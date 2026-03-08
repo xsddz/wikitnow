@@ -25,14 +25,13 @@ type TokenManager struct {
 	client *resty.Client
 }
 
-// NewTokenManager 初始化凭证管理器，按环境变量 -> ~/.wikitnow 配置文件顺序取值
+// NewTokenManager 初始化凭证管理器，按环境变量 -> ~/.wikitnow/config.json 顺序取值
 func NewTokenManager() (*TokenManager, error) {
-	appID := os.Getenv("FEISHU_APP_ID")
-	appSecret := os.Getenv("FEISHU_APP_SECRET")
+	appID := os.Getenv("WIKITNOW_FEISHU_APP_ID")
+	appSecret := os.Getenv("WIKITNOW_FEISHU_APP_SECRET")
 
 	if appID == "" || appSecret == "" {
-		// 尝试从全局配置 fallback
-		id, secret := readFswikiConfig()
+		id, secret := readFeishuConfig()
 		if id != "" && secret != "" {
 			appID = id
 			appSecret = secret
@@ -40,7 +39,7 @@ func NewTokenManager() (*TokenManager, error) {
 	}
 
 	if appID == "" || appSecret == "" {
-		return nil, errors.New("缺乏飞书凭证: 请配置全局环境变量 FEISHU_APP_ID / FEISHU_APP_SECRET，或配置 ~/.wikitnow/credentials.json")
+		return nil, errors.New("缺乏飞书凭证: 请配置环境变量 WIKITNOW_FEISHU_APP_ID / WIKITNOW_FEISHU_APP_SECRET，或在 ~/.wikitnow/config.json 中配置")
 	}
 
 	return &TokenManager{
@@ -48,6 +47,60 @@ func NewTokenManager() (*TokenManager, error) {
 		appSecret: appSecret,
 		client:    resty.New().SetTimeout(10 * time.Second),
 	}, nil
+}
+
+// ConfigPath 返回全局配置文件路径
+func ConfigPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".wikitnow", "config.json"), nil
+}
+
+// GlobalConfig 表示 ~/.wikitnow/config.json 的完整结构
+type GlobalConfig struct {
+	DefaultProvider string        `json:"default_provider,omitempty"`
+	Feishu          *FeishuConfig `json:"feishu,omitempty"`
+}
+
+// FeishuConfig 表示飞书凭证配置
+type FeishuConfig struct {
+	AppID     string `json:"app_id"`
+	AppSecret string `json:"app_secret"`
+}
+
+// ReadGlobalConfig 读取并解析全局配置文件
+func ReadGlobalConfig() (*GlobalConfig, error) {
+	path, err := ConfigPath()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var cfg GlobalConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// WriteGlobalConfig 将配置写入全局配置文件（权限 600）
+func WriteGlobalConfig(cfg *GlobalConfig) error {
+	path, err := ConfigPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0600)
 }
 
 // GetToken 获取当前有效的 Token，并在需要时自动刷新
@@ -91,27 +144,11 @@ func (m *TokenManager) GetToken() (string, error) {
 	return m.token, nil
 }
 
-// readWikitnowConfig 尝试从 ~/.wikitnow/credentials.json 读取配置
-func readFswikiConfig() (string, string) {
-	home, err := os.UserHomeDir()
-	if err != nil {
+// readFeishuConfig 从 ~/.wikitnow/config.json 读取飞书凭证
+func readFeishuConfig() (string, string) {
+	cfg, err := ReadGlobalConfig()
+	if err != nil || cfg.Feishu == nil {
 		return "", ""
 	}
-	configPath := filepath.Join(home, ".wikitnow", "credentials.json")
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return "", ""
-	}
-
-	var config struct {
-		AppID     string `json:"app_id"`
-		AppSecret string `json:"app_secret"`
-	}
-
-	if err := json.Unmarshal(data, &config); err != nil {
-		return "", ""
-	}
-
-	return config.AppID, config.AppSecret
+	return cfg.Feishu.AppID, cfg.Feishu.AppSecret
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io"
@@ -16,21 +17,25 @@ import (
 )
 
 func main() {
-	// 自定义 Usage
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "用法: %s <命令> [参数] [flags]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "命令:\n")
-		fmt.Fprintf(os.Stderr, "  sync    将本地文件或目录同步到知识库\n")
-		fmt.Fprintf(os.Stderr, "  config  查看工具配置信息\n\n")
+		fmt.Fprintf(os.Stderr, "  sync      将本地文件或目录同步到知识库\n")
+		fmt.Fprintf(os.Stderr, "  auth      管理平台凭证\n")
+		fmt.Fprintf(os.Stderr, "  provider  查看支持的知识库平台\n")
+		fmt.Fprintf(os.Stderr, "  config    配置管理\n\n")
 		fmt.Fprintf(os.Stderr, "示例:\n")
-		fmt.Fprintf(os.Stderr, "  %s sync ./docs                                        # 仅安全预览将要同步的本地结构\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s sync ./docs https://your-wiki-url                  # 安全预览即将要同步的节点树结构（含目标提取）\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s sync ./docs https://your-wiki-url --apply          # 确认无误，执行真实的推送操作\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s config show-ignore                                 # 查看系统默认排除规则\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s sync ./docs                                        # 安全预览将要同步的本地结构\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s sync ./docs https://your-wiki-url                  # 安全预览（含目标节点信息）\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s sync ./docs https://your-wiki-url --apply          # 确认无误，执行真实推送\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s auth setup                                         # 交互式配置平台凭证\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s auth check                                         # 验证凭证是否有效\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s provider list                                      # 查看支持的平台\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s config show-ignore                                 # 查看当前生效的排除规则\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s config init-ignore                                 # 在当前目录生成 .wikitnow/ignore\n\n", os.Args[0])
 	}
 
 	flag.Parse()
-
 	args := flag.Args()
 
 	if len(args) < 1 {
@@ -39,18 +44,23 @@ func main() {
 	}
 
 	switch args[0] {
+	case "auth":
+		runAuth(args[1:])
+	case "provider":
+		runProvider(args[1:])
 	case "config":
 		runConfig(args[1:])
-		return
 	case "sync":
-		// 继续执行下面的 sync 逻辑
+		runSync(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "❌ 未知命令: %s\n\n", args[0])
 		flag.Usage()
 		os.Exit(1)
 	}
+}
 
-	// 自定义子命令参数解析器
+// runSync 处理 sync 子命令
+func runSync(args []string) {
 	syncCmd := flag.NewFlagSet("sync", flag.ExitOnError)
 	var apply bool
 	var useCodeBlock bool
@@ -59,11 +69,10 @@ func main() {
 	syncCmd.BoolVar(&useCodeBlock, "code-block", true, "对于文本文件，是否将其内容使用代码块包裹插入（默认 true）。设为 false 则插入纯文本")
 	syncCmd.BoolVar(&debug, "debug", false, "调试模式：将每次 HTTP 请求的方法和 URL 打印到 stderr")
 
-	// Go 的 flag.FlagSet 遇到第一个非 flag 参数即停止解析，
 	// 为支持 flags 写在位置参数之后（如 sync ./docs URL --apply），
 	// 预先将所有 flag 参数（-- 或 - 开头）重排到位置参数前面。
 	var flagArgs, posArgs []string
-	for _, a := range args[1:] {
+	for _, a := range args {
 		if strings.HasPrefix(a, "-") {
 			flagArgs = append(flagArgs, a)
 		} else {
@@ -74,8 +83,8 @@ func main() {
 	syncArgs := syncCmd.Args()
 
 	if len(syncArgs) < 1 {
-		fmt.Println("❌ 错误: 必须提供 <本地路径>")
-		flag.Usage()
+		fmt.Fprintln(os.Stderr, "❌ 错误: 必须提供 <本地路径>")
+		fmt.Fprintf(os.Stderr, "用法: wikitnow sync <本地路径> [Wiki URL] [--apply] [--code-block=false]\n")
 		os.Exit(1)
 	}
 
@@ -85,33 +94,26 @@ func main() {
 		wikiURL = syncArgs[1]
 	}
 
-	// 真实上传时强制要求提供 wikiURL
 	if apply && wikiURL == "" {
-		fmt.Println("❌ 错误: 使用 --apply 进行真实同步时，必须提供目标 <Wiki URL>")
+		fmt.Fprintln(os.Stderr, "❌ 错误: 使用 --apply 进行真实同步时，必须提供目标 <Wiki URL>")
 		os.Exit(1)
 	}
 
-	// 1. 初始化 Auth
 	authManager, err := auth.NewTokenManager()
 	if err != nil && apply {
 		fmt.Printf("❌ 认证错误: %v\n", err)
 		os.Exit(1)
 	} else if err != nil && !apply {
-		fmt.Printf("⚠️ 认证提醒: %v (仅做本地目录测试，不影响树状结构预览)\n", err)
+		fmt.Printf("⚠️  认证提醒: %v\n   (仅做本地目录预览，不影响树状结构展示)\n", err)
 	}
 
-	// 2. 初始化 API 客户端
 	client := feishu.NewClient(authManager, debug)
-
-	// 实例化 Provider（当前默认只使用飞书）
 	prov := feishuprov.NewProvider(client)
 
 	var parentNodeToken string
 	var spaceID string
 
-	// 只有当提供了 wikiURL (包含 Apply 或单预览 URL 提取时) 才会进行解析
 	if wikiURL != "" {
-		// 3. 利用 Provider 提取根节点信息
 		extractedSpace, extractedParent, err := prov.ExtractRoot(wikiURL)
 		if err != nil {
 			fmt.Printf("❌ URL 解析与提取失败: %v\n", err)
@@ -124,7 +126,6 @@ func main() {
 		fmt.Printf("📁 目标知识库 Space ID: %s\n", spaceID)
 	}
 
-	// 5. 初始化并启动同步引擎：在未携带 --apply 时，默认状态下处于 Dry-Run 安全模式
 	engine := sync.NewEngine(prov, localPath, !apply, useCodeBlock)
 	err = engine.Sync(localPath, spaceID, parentNodeToken)
 	if err != nil {
@@ -139,6 +140,104 @@ func main() {
 	}
 }
 
+// runAuth 处理 auth 子命令
+func runAuth(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, "用法: wikitnow auth <子命令>\n\n")
+		fmt.Fprintf(os.Stderr, "可用子命令:\n")
+		fmt.Fprintf(os.Stderr, "  setup [--provider feishu]   交互式配置凭证并写入 ~/.wikitnow/config.json\n")
+		fmt.Fprintf(os.Stderr, "  check [--provider feishu]   验证当前凭证是否有效\n")
+		os.Exit(1)
+	}
+
+	switch args[0] {
+	case "setup":
+		setupCmd := flag.NewFlagSet("setup", flag.ExitOnError)
+		provider := setupCmd.String("provider", "feishu", "目标平台")
+		setupCmd.Parse(args[1:])
+
+		switch *provider {
+		case "feishu":
+			reader := bufio.NewReader(os.Stdin)
+			fmt.Print("请输入飞书 App ID: ")
+			appID, _ := reader.ReadString('\n')
+			appID = strings.TrimSpace(appID)
+
+			fmt.Print("请输入飞书 App Secret: ")
+			appSecret, _ := reader.ReadString('\n')
+			appSecret = strings.TrimSpace(appSecret)
+
+			if appID == "" || appSecret == "" {
+				fmt.Fprintln(os.Stderr, "❌ App ID 和 App Secret 不能为空")
+				os.Exit(1)
+			}
+
+			cfg, err := auth.ReadGlobalConfig()
+			if err != nil {
+				cfg = &auth.GlobalConfig{}
+			}
+			if cfg.DefaultProvider == "" {
+				cfg.DefaultProvider = "feishu"
+			}
+			cfg.Feishu = &auth.FeishuConfig{AppID: appID, AppSecret: appSecret}
+
+			if err := auth.WriteGlobalConfig(cfg); err != nil {
+				fmt.Fprintf(os.Stderr, "❌ 写入配置失败: %v\n", err)
+				os.Exit(1)
+			}
+			cfgPath, _ := auth.ConfigPath()
+			fmt.Printf("✅ 飞书凭证已保存至 %s\n", cfgPath)
+
+		default:
+			fmt.Fprintf(os.Stderr, "❌ 未知 provider: %s\n", *provider)
+			os.Exit(1)
+		}
+
+	case "check":
+		checkCmd := flag.NewFlagSet("check", flag.ExitOnError)
+		checkCmd.String("provider", "feishu", "目标平台")
+		checkCmd.Parse(args[1:])
+
+		mgr, err := auth.NewTokenManager()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ 凭证无效: %v\n", err)
+			os.Exit(1)
+		}
+		_, err = mgr.GetToken()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ 凭证验证失败: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("✅ 凭证有效")
+
+	default:
+		fmt.Fprintf(os.Stderr, "❌ 未知 auth 子命令: %s\n", args[0])
+		os.Exit(1)
+	}
+}
+
+// runProvider 处理 provider 子命令
+func runProvider(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, "用法: wikitnow provider <子命令>\n\n")
+		fmt.Fprintf(os.Stderr, "可用子命令:\n")
+		fmt.Fprintf(os.Stderr, "  list   列出所有支持的知识库平台\n")
+		os.Exit(1)
+	}
+
+	switch args[0] {
+	case "list":
+		fmt.Println("支持的知识库平台:")
+		fmt.Println()
+		fmt.Println("  feishu   飞书（Lark）知识库")
+		fmt.Println("           凭证: WIKITNOW_FEISHU_APP_ID / WIKITNOW_FEISHU_APP_SECRET")
+		fmt.Println("           配置: ~/.wikitnow/config.json -> feishu.app_id / feishu.app_secret")
+	default:
+		fmt.Fprintf(os.Stderr, "❌ 未知 provider 子命令: %s\n", args[0])
+		os.Exit(1)
+	}
+}
+
 // runConfig 处理 config 子命令
 func runConfig(args []string) {
 	const systemIgnorePath = "/usr/local/etc/wikitnow/ignore"
@@ -146,8 +245,8 @@ func runConfig(args []string) {
 	if len(args) == 0 {
 		fmt.Fprintf(os.Stderr, "用法: wikitnow config <子命令>\n\n")
 		fmt.Fprintf(os.Stderr, "可用子命令:\n")
-		fmt.Fprintf(os.Stderr, "  show-ignore    查看当前目录下实际生效的排除规则\n")
-		fmt.Fprintf(os.Stderr, "  init-ignore    在当前目录生成 .wikitnow/ignore（内容来自系统默认）\n")
+		fmt.Fprintf(os.Stderr, "  show-ignore            查看当前目录下实际生效的排除规则\n")
+		fmt.Fprintf(os.Stderr, "  init-ignore [--force]  在当前目录生成 .wikitnow/ignore（内容来自系统默认）\n")
 		os.Exit(1)
 	}
 
@@ -170,7 +269,6 @@ func runConfig(args []string) {
 		io.Copy(os.Stdout, f)
 
 	case "init-ignore":
-		// 解析 --force 选项
 		initCmd := flag.NewFlagSet("init-ignore", flag.ExitOnError)
 		force := initCmd.Bool("force", false, "强制覆盖已存在的 .wikitnow/ignore")
 		initCmd.Parse(args[1:])
@@ -183,14 +281,12 @@ func runConfig(args []string) {
 		destDir := filepath.Join(cwd, ".wikitnow")
 		destFile := filepath.Join(destDir, "ignore")
 
-		// 检查目标文件是否已存在
 		if _, err := os.Stat(destFile); err == nil && !*force {
 			fmt.Fprintf(os.Stderr, "⚠️  文件已存在: %s\n", destFile)
 			fmt.Fprintf(os.Stderr, "   若要覆盖，请追加 --force 参数。\n")
 			os.Exit(1)
 		}
 
-		// 内容来源：优先系统默认文件，fallback 到二进制内嵌默认内容
 		var content []byte
 		if data, err := os.ReadFile(systemIgnorePath); err == nil {
 			content = data
@@ -198,7 +294,6 @@ func runConfig(args []string) {
 			content = configs.IgnoreContent
 		}
 
-		// 创建目标目录和文件
 		if err := os.MkdirAll(destDir, 0755); err != nil {
 			fmt.Fprintf(os.Stderr, "❌ 无法创建目录 %s: %v\n", destDir, err)
 			os.Exit(1)
@@ -208,7 +303,7 @@ func runConfig(args []string) {
 			os.Exit(1)
 		}
 		fmt.Printf("✅ 已生成: %s\n", destFile)
-		fmt.Printf("   内容来自默认规则，可按需修改。\n")
+		fmt.Println("   内容来自默认规则，可按需修改。")
 
 	default:
 		fmt.Fprintf(os.Stderr, "❌ 未知 config 子命令: %s\n", args[0])
@@ -217,9 +312,8 @@ func runConfig(args []string) {
 }
 
 // findActiveIgnoreFile 按优先级链查找当前生效的 ignore 文件路径（找到即返回）。
-// 查找顺序：CWD 向上逐级→用户全局→系统默认
+// 查找顺序：CWD 向上逐级 → 用户全局 → 系统默认
 func findActiveIgnoreFile(systemIgnorePath string) string {
-	// 1. 从当前工作目录向上逐级查找
 	cwd, err := os.Getwd()
 	if err == nil {
 		searchPath := cwd
@@ -236,7 +330,6 @@ func findActiveIgnoreFile(systemIgnorePath string) string {
 		}
 	}
 
-	// 2. 用户全局
 	if home, err := os.UserHomeDir(); err == nil {
 		candidate := filepath.Join(home, ".wikitnow", "ignore")
 		if _, err := os.Stat(candidate); err == nil {
@@ -244,7 +337,6 @@ func findActiveIgnoreFile(systemIgnorePath string) string {
 		}
 	}
 
-	// 3. 系统默认
 	if _, err := os.Stat(systemIgnorePath); err == nil {
 		return systemIgnorePath
 	}

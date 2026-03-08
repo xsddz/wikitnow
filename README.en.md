@@ -36,9 +36,8 @@
 # 1. Install (one-line for macOS/Linux)
 curl -fsSL https://raw.githubusercontent.com/xsddz/wikitnow/main/scripts/install.sh | bash
 
-# 2. Configure Credentials (using Feishu as example)
-export FEISHU_APP_ID="cli_a1b2..."
-export FEISHU_APP_SECRET="your_app_secret_here"
+# 2. Configure credentials (interactive, writes to ~/.wikitnow/config.json)
+wikitnow auth setup
 
 # 3. Safe Preview (Wiki URL is optional; when provided, also shows target node info)
 wikitnow sync ./docs/guide.md "https://my.feishu.cn/wiki/wikcnXyz123..."
@@ -84,25 +83,38 @@ make build-all       # Cross-platform build
 
 ### Authentication
 
-| Priority | Source | Best For |
-|----------|--------|----------|
-| High | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` env vars | CI/CD, automation |
-| Low | `~/.wikitnow/credentials.json` | Local development |
+Credentials are stored in a single file `~/.wikitnow/config.json`, created automatically by `wikitnow auth setup` (permissions `600`):
+
+```json
+{
+  "default_provider": "feishu",
+  "feishu": {
+    "app_id": "cli_a1b2c3d4e5f6",
+    "app_secret": "your_app_secret_here"
+  }
+}
+```
+
+Environment variables take priority over the config file (ideal for CI/CD):
+
+| Provider | Environment Variables |
+|----------|-----------------------|
+| Feishu | `WIKITNOW_FEISHU_APP_ID` / `WIKITNOW_FEISHU_APP_SECRET` |
+
+**Priority (high → low):** CLI flags > env vars > `~/.wikitnow/config.json` > built-in defaults
 
 ### File Exclusion (`.wikitnow/ignore`)
 
-Create a `.wikitnow/ignore` file to specify files and directories to skip. The syntax is identical to `.gitignore`.
+Syntax is fully compatible with `.gitignore`. Lookup stops at the **first match found** — no merging between levels:
 
-**Lookup priority (first match wins):**
+| Priority | Path | Description |
+|----------|------|-------------|
+| 1 | `<sync-dir>/.wikitnow/ignore` | Project-level, highest priority |
+| 2 | `<parent dirs (ascending)>/.wikitnow/ignore` | Supports nested projects |
+| 3 | `~/.wikitnow/ignore` | User global config |
+| 4 | `/usr/local/etc/wikitnow/ignore` | System default (installed with binary) |
 
-```
-<sync-dir>/.wikitnow/ignore    ← project-level, highest priority
-parent dirs (ascending)/.wikitnow/ignore
-~/.wikitnow/ignore               ← user global config
-/usr/local/etc/wikitnow/ignore  ← system default (installed with binary)
-```
-
-> Hidden files (starting with `.`) are always skipped regardless of config.
+> Hidden files (starting with `.`) are always skipped, regardless of rules.
 
 📖 See [docs/configuration.md](docs/configuration.md) for details.
 
@@ -112,6 +124,18 @@ parent dirs (ascending)/.wikitnow/ignore
 # Show help
 wikitnow -h
 
+# -- Credentials --------------------------------------------------
+# Interactive credential setup (writes to ~/.wikitnow/config.json)
+wikitnow auth setup
+
+# Verify credentials are valid
+wikitnow auth check
+
+# -- Platform Info ------------------------------------------------
+# List all supported platforms
+wikitnow provider list
+
+# -- Sync ---------------------------------------------------------
 # Safe Preview: show what would be synced (Wiki URL optional)
 wikitnow sync <local-path> [wiki-url]
 
@@ -120,6 +144,13 @@ wikitnow sync <local-path> <wiki-url> --apply
 
 # Sync text files without code block wrapping
 wikitnow sync <local-path> <wiki-url> --apply --code-block=false
+
+# -- Config -------------------------------------------------------
+# Show currently active exclusion rules and their source path
+wikitnow config show-ignore
+
+# Generate .wikitnow/ignore in the current directory
+wikitnow config init-ignore
 ```
 
 ## 📝 License

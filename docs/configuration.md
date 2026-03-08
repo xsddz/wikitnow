@@ -1,24 +1,39 @@
-# 配置文件说明
+# 配置说明
 
-`wikitnow` 的所有配置均基于文件系统中的普通文本文件，无需学习专有格式。
+`wikitnow` 所有配置均基于普通文件，无需学习专有格式。
 
 ---
 
-## 凭证配置（身份认证）
+## 凭证配置
 
-工具需要飞书 `APP_ID` 和 `APP_SECRET` 才能调用 API。提供两种方式，**互为备选**：
+凭证统一存储于 `~/.wikitnow/config.json`，由 `wikitnow auth setup` 自动创建（文件权限 `600`）：
 
-| 优先级 | 来源 | 适用场景 |
-|--------|------|---------|
-| 高 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 环境变量 | CI/CD、脚本自动化 |
-| 低 | `~/.wikitnow/credentials.json` | 本地开发，避免反复输入 |
-
-**`~/.wikitnow/credentials.json` 格式：**
 ```json
 {
-  "app_id": "cli_xxx",
-  "app_secret": "xxx"
+  "default_provider": "feishu",
+  "feishu": {
+    "app_id": "cli_a1b2c3d4e5f6",
+    "app_secret": "your_app_secret_here"
+  }
 }
+```
+
+也可通过环境变量提供凭证（适合 CI/CD），优先级高于配置文件：
+
+| Provider | 环境变量 |
+|----------|---------|
+| 飞书 | `WIKITNOW_FEISHU_APP_ID` / `WIKITNOW_FEISHU_APP_SECRET` |
+
+**读取优先级（高 → 低）**：命令行参数 > 环境变量 > `~/.wikitnow/config.json` > 内置默认值
+
+### 管理凭证
+
+```bash
+# 交互式配置，自动写入 ~/.wikitnow/config.json
+wikitnow auth setup
+
+# 验证当前凭证是否有效
+wikitnow auth check
 ```
 
 ---
@@ -42,9 +57,9 @@
 /usr/local/etc/wikitnow/ignore       ← 系统级默认（随命令安装）
 ```
 
-> **规则**：找到任何一个配置文件即停止，该文件**完全**接管排除逻辑，不与其他层叠加。
-> 
-> **隐藏文件**（以 `.` 开头，如 `.git`, `.DS_Store`）始终被跳过，不受配置文件影响。
+> 找到任何一个配置文件即停止，该文件**完全**接管排除逻辑，不与其他层叠加。
+>
+> 隐藏文件（以 `.` 开头，如 `.git`、`.DS_Store`）始终被跳过，不受配置文件影响。
 
 ### 示例配置
 
@@ -56,48 +71,47 @@ dist/
 build/
 *.pyc
 
-# 依赖（覆盖系统默认，按需保留或删除）
+# 依赖目录
 node_modules/
 
-# 自定义：允许同步 PDF（在系统默认中 PDF 被过滤，这里去掉该规则即可让其同步）
-# 提示：只要不写 *.pdf，PDF 文件就会被同步
+# 自定义：只要不写 *.pdf，PDF 文件就会被同步
 ```
 
-### 自定义与系统默认的关系
+### 各层级关系说明
 
 | 场景 | 行为 |
 |------|------|
-| 无任何配置文件 | 打印警告，建议运行 init-ignore 初始化或手动创建 |
+| 无任何配置文件 | 所有文件均同步（隐藏文件除外） |
 | 有项目级配置 | 仅使用该文件，系统默认**不生效** |
 | 有用户全局配置 | 仅使用该文件，系统默认**不生效** |
 | 仅有系统默认 | 使用 `/usr/local/etc/wikitnow/ignore`（安装时自动部署） |
 
-> 如果您想在项目配置中**继续使用**系统默认的大多数规则，可以将 `/usr/local/etc/wikitnow/ignore` 的内容复制到项目的 `.wikitnow/ignore` 中，再按需修改。
+> 若想在项目配置中继续沿用系统默认的大多数规则，可将 `/usr/local/etc/wikitnow/ignore` 的内容复制到项目的 `.wikitnow/ignore` 中，再按需修改。
 
 ### 查看当前生效规则
 
-运行以下命令可直接查看**在当前目录下实际生效**的排除规则（按优先级链查找后找到即返回，并显示来源路径）：
-
 ```bash
+# 显示当前目录实际生效的排除规则及其来源路径
 wikitnow config show-ignore
 ```
 
 ### 初始化项目级规则
 
-如果当前目录还没有配置文件，可一键生成一份（内容来自系统默认，可按需修改）：
-
 ```bash
-wikitnow config init-ignore          # 在当前目录创建 .wikitnow/ignore
-wikitnow config init-ignore --force  # 强制覆盖已有文件
+# 在当前目录生成 .wikitnow/ignore（内容来自系统默认，可按需修改）
+wikitnow config init-ignore
+
+# 强制覆盖已有文件
+wikitnow config init-ignore --force
 ```
 
 ---
 
-## 配置文件位置一览
+## 配置文件一览
 
-| 文件 | 作用 |
-|------|------|
-| `<project>/.wikitnow/ignore` | 项目级排除规则 |
-| `~/.wikitnow/ignore` | 用户全局排除规则 |
-| `~/.wikitnow/credentials.json` | 全局凭证配置 |
-| `/usr/local/etc/wikitnow/ignore` | 系统级默认排除规则（随命令安装） |
+| 文件 | 作用 | 管理方式 |
+|------|------|----------|
+| `~/.wikitnow/config.json` | 凭证与全局偏好 | `wikitnow auth setup` 或直接编辑 |
+| `<project>/.wikitnow/ignore` | 项目级排除规则 | `wikitnow config init-ignore` 或直接编辑 |
+| `~/.wikitnow/ignore` | 用户全局排除规则 | 直接编辑 |
+| `/usr/local/etc/wikitnow/ignore` | 系统默认排除规则 | 随命令安装，可覆盖 |
