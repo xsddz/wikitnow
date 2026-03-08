@@ -34,7 +34,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s auth check                                              # 验证凭证是否有效\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s provider list                                           # 查看支持的平台\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s config show-ignore                                      # 查看当前生效的排除规则\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s config init-ignore                                      # 在当前目录生成 .wikitnow/ignore\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s config init-ignore                                      # 在当前目录生成 .wikitnow/ignore\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s config init-ignore --dest /usr/local/etc/wikitnow/ignore  # 指定输出路径\n\n", os.Args[0])
 	}
 
 	flag.Parse()
@@ -288,7 +289,7 @@ func runConfig(args []string) {
 		fmt.Fprintf(os.Stderr, "用法: wikitnow config <子命令>\n\n")
 		fmt.Fprintf(os.Stderr, "可用子命令:\n")
 		fmt.Fprintf(os.Stderr, "  show-ignore            查看当前目录下实际生效的排除规则\n")
-		fmt.Fprintf(os.Stderr, "  init-ignore [--force]  在当前目录生成 .wikitnow/ignore（内容来自系统默认）\n")
+		fmt.Fprintf(os.Stderr, "  init-ignore [--force] [--dest <path>]  在当前目录（或指定路径）生成 .wikitnow/ignore\n")
 		os.Exit(1)
 	}
 
@@ -312,16 +313,23 @@ func runConfig(args []string) {
 
 	case "init-ignore":
 		initCmd := flag.NewFlagSet("init-ignore", flag.ExitOnError)
-		force := initCmd.Bool("force", false, "强制覆盖已存在的 .wikitnow/ignore")
+		force := initCmd.Bool("force", false, "强制覆盖已存在的文件")
+		dest := initCmd.String("dest", "", "直接指定输出文件的完整路径（默认：<当前目录>/.wikitnow/ignore）")
 		initCmd.Parse(args[1:])
 
-		cwd, err := os.Getwd()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "❌ 无法获取当前目录: %v\n", err)
-			os.Exit(1)
+		var destDir, destFile string
+		if *dest != "" {
+			destFile = *dest
+			destDir = filepath.Dir(destFile)
+		} else {
+			cwd, err := os.Getwd()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "❌ 无法获取当前目录: %v\n", err)
+				os.Exit(1)
+			}
+			destDir = filepath.Join(cwd, ".wikitnow")
+			destFile = filepath.Join(destDir, "ignore")
 		}
-		destDir := filepath.Join(cwd, ".wikitnow")
-		destFile := filepath.Join(destDir, "ignore")
 
 		if _, err := os.Stat(destFile); err == nil && !*force {
 			fmt.Fprintf(os.Stderr, "⚠️  文件已存在: %s\n", destFile)

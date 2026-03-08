@@ -64,10 +64,10 @@ echo "Installing system-level default ignore rules to $SYSTEM_IGNORE_FILE..."
 if [ -w "$SYSTEM_CONFIG_DIR" ] 2>/dev/null || sudo mkdir -p "$SYSTEM_CONFIG_DIR" 2>/dev/null; then
     if [ -w "$SYSTEM_CONFIG_DIR" ]; then
         mkdir -p "$SYSTEM_CONFIG_DIR"
-        (cd "$SYSTEM_CONFIG_DIR" && "$INSTALL_DIR/$BIN_NAME" config init-ignore --force)
+        "$INSTALL_DIR/$BIN_NAME" config init-ignore --dest "$SYSTEM_IGNORE_FILE" --force
     else
         sudo mkdir -p "$SYSTEM_CONFIG_DIR"
-        (cd "$SYSTEM_CONFIG_DIR" && sudo "$INSTALL_DIR/$BIN_NAME" config init-ignore --force)
+        sudo "$INSTALL_DIR/$BIN_NAME" config init-ignore --dest "$SYSTEM_IGNORE_FILE" --force
     fi
     echo "   System ignore config: $SYSTEM_IGNORE_FILE"
 else
