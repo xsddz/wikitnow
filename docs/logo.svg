@@ -1,22 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
   <defs>
-    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#4f46e5;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#06b6d4;stop-opacity:1" />
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0ea5e9;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#6366f1;stop-opacity:1" />
     </linearGradient>
   </defs>
 
   <!-- Background circle -->
-  <circle cx="60" cy="60" r="55" fill="url(#grad)" />
+  <circle cx="60" cy="60" r="55" fill="url(#grad1)"/>
 
-  <!-- Upward arrow (representing "now / push") -->
-  <line x1="60" y1="58" x2="60" y2="26" stroke="white" stroke-width="5" stroke-linecap="round" />
-  <path d="M48 40 L60 24 L72 40" stroke="white" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <!-- Document body with folded top-right corner -->
+  <path d="M26 42 L64 42 L76 54 L76 90 L26 90 Z" fill="white" opacity="0.95"/>
+  <!-- Fold flap shadow -->
+  <path d="M64 42 L76 54 L64 54 Z" fill="#c7d2fe" opacity="0.75"/>
 
-  <!-- Wiki node tree (root + 2 children, representing structured knowledge) -->
-  <circle cx="60" cy="70" r="11" fill="white" />
-  <line x1="51" y1="78" x2="36" y2="92" stroke="white" stroke-width="4" stroke-linecap="round" opacity="0.85" />
-  <line x1="69" y1="78" x2="84" y2="92" stroke="white" stroke-width="4" stroke-linecap="round" opacity="0.85" />
-  <circle cx="33" cy="95" r="8" fill="white" opacity="0.85" />
-  <circle cx="87" cy="95" r="8" fill="white" opacity="0.85" />
+  <!-- Text lines inside document -->
+  <line x1="34" y1="63" x2="68" y2="63" stroke="#4338ca" stroke-width="3" stroke-linecap="round" opacity="0.4"/>
+  <line x1="34" y1="72" x2="68" y2="72" stroke="#4338ca" stroke-width="3" stroke-linecap="round" opacity="0.4"/>
+  <line x1="34" y1="81" x2="52" y2="81" stroke="#4338ca" stroke-width="3" stroke-linecap="round" opacity="0.4"/>
+
+  <!-- Accent badge: upload-now dot (top right, overlaps doc corner) -->
+  <circle cx="80" cy="34" r="13" fill="#f97316"/>
+  <!-- Up arrow inside badge -->
+  <line x1="80" y1="27" x2="80" y2="39" stroke="white" stroke-width="3.5" stroke-linecap="round"/>
+  <polyline points="74,34 80,26 86,34" fill="none" stroke="white" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
