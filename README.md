@@ -5,7 +5,7 @@
 <h1 align="center">wikitnow</h1>
 
 <p align="center">
-  <strong>Wiki It Now 🚀</strong> — A lightweight, high-performance CLI tool that instantly transforms your local Markdown notes and directory structure into a structured cloud knowledge base.
+  <strong>Wiki It Now 🚀</strong> — Publish your local Markdown notes to a cloud knowledge base
 </p>
 
 <p align="center">
@@ -20,17 +20,15 @@
 
 ---
 
-## ✨ Core Philosophy
+## ✨ Features
 
-Build your local repository of knowledge and let `wikitnow` effortlessly transform it into a structured, shareable cloud Knowledge Base.
-
-- 🏗️ **Wiki Builder**: Recursively maps your entire local directory tree into a perfectly mirroring wiki hierarchy in seconds.
-- 🖥️ **Cross-platform**: Native binaries for macOS, Linux, and Windows.
-- 📂 **Smart Traversal**: Automatically detects whether you are syncing a single file or recursively building an entire directory tree.
-- 🛡️ **Git-style Ignore**: Supports `.wikitnow/ignore` with standard `.gitignore` glob matching.
-- ⚡ **Zero-dependency**: Written in Go, compiles to a single, standalone binary.
-- 🔒 **Safe By Default**: By default, `sync` acts as a read-only preview. Use `--apply` to actually execute changes.
-- 🔌 **Extensible**: Built on a Provider interface — currently supports Feishu (Lark), with architecture ready for other platforms.
+- 🏗️ **Wiki Builder**: Maps your local directory tree 1:1 into a cloud wiki hierarchy
+- 🖥️ **Cross-platform**: Native binaries for macOS, Linux, and Windows
+- 📂 **Smart Traversal**: Handles single files or full directory tree recursion automatically
+- 🛡️ **Git-style Ignore**: `.wikitnow/ignore` with standard `.gitignore` glob syntax
+- ⚡ **Zero-dependency**: Single standalone binary, no runtime required
+- 🔒 **Safe By Default**: Dry-run preview by default; `--apply` to write
+- 🔌 **Extensible**: Provider interface — currently supports Feishu (Lark)
 
 ## 🚀 Quick Start
 
@@ -86,24 +84,10 @@ make build-all       # Cross-platform build
 
 ### Authentication
 
-The CLI requires your Feishu `APP_ID` and `APP_SECRET` to interact with Feishu APIs.
-
-**Option A: Environment Variables (Recommended for CI/CD)**
-
-```bash
-export FEISHU_APP_ID="cli_xxx"
-export FEISHU_APP_SECRET="xxx"
-```
-
-**Option B: Global Credentials File (Recommended for Local Dev)**
-
-Create `~/.wikitnow/credentials.json`:
-```json
-{
-  "app_id": "cli_xxx",
-  "app_secret": "xxx"
-}
-```
+| Priority | Source | Best For |
+|----------|--------|----------|
+| High | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` env vars | CI/CD, automation |
+| Low | `~/.wikitnow/credentials.json` | Local development |
 
 ### File Exclusion (`.wikitnow/ignore`)
 

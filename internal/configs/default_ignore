@@ -1,21 +1,21 @@
-# fswiki 默认排除规则 (default_ignore)
+# wikitnow 默认排除规则 (default_ignore)
 #
-# 此文件由 install.sh 安装到 /usr/local/etc/fswiki/ignore
+# 此文件由 install.sh 安装到 /usr/local/etc/wikitnow/ignore
 # 它是整个配置查找链的最后兜底（在项目级、用户级配置之后）。
 #
 # 查找优先级（从高到低，找到即停止）:
-#   1. <project>/.fswiki/ignore       — 项目级，优先级最高
-#   2. <parent dirs>/.fswiki/ignore   — 向上逐级查找
-#   3. ~/.fswiki/ignore               — 用户全局配置
-#   4. /usr/local/etc/fswiki/ignore   — 本文件，系统级默认
+#   1. <project>/.wikitnow/ignore       — 项目级，优先级最高
+#   2. <parent dirs>/.wikitnow/ignore   — 向上逐级查找
+#   3. ~/.wikitnow/ignore               — 用户全局配置
+#   4. /usr/local/etc/wikitnow/ignore   — 本文件，系统级默认
 #
 # 语法规则与 .gitignore 完全兼容。
 
 # ── 版本控制 ──────────────────────────────
 .git/
 
-# ── fswiki 工作目录（程序自身必须跳过）────
-.fswiki/
+# ── wikitnow 工作目录（程序自身必须跳过）────
+.wikitnow/
 
 # ── 系统/编辑器产生的垃圾文件 ────────────
 .DS_Store

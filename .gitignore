@@ -1,6 +1,6 @@
 # Binary
 bin/
-/fswiki
+/wikitnow
 
 # OS
 .DS_Store
@@ -20,4 +20,4 @@ vendor/
 *.swo
 
 # Project specific
-.fswiki/
+.wikitnow/
