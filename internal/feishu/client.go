@@ -28,6 +28,9 @@ func NewClient(authManager *auth.TokenManager, debug bool) *Client {
 
 	// 统一注入 Authorization 头部
 	r.OnBeforeRequest(func(c *resty.Client, req *resty.Request) error {
+		if authManager == nil {
+			return fmt.Errorf("未配置凭证，无法发起网络请求")
+		}
 		token, err := authManager.GetToken()
 		if err != nil {
 			return err

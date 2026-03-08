@@ -39,7 +39,7 @@ func NewTokenManager() (*TokenManager, error) {
 	}
 
 	if appID == "" || appSecret == "" {
-		return nil, errors.New("缺乏飞书凭证: 请配置环境变量 WIKITNOW_FEISHU_APP_ID / WIKITNOW_FEISHU_APP_SECRET，或在 ~/.wikitnow/config.json 中配置")
+		return nil, errors.New("飞书凭证未配置（环境变量 WIKITNOW_FEISHU_APP_ID / WIKITNOW_FEISHU_APP_SECRET，或 ~/.wikitnow/config.json）")
 	}
 
 	return &TokenManager{

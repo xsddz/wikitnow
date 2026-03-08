@@ -104,7 +104,7 @@ func runSync(args []string) {
 		fmt.Printf("❌ 认证错误: %v\n", err)
 		os.Exit(1)
 	} else if err != nil && !apply {
-		fmt.Printf("⚠️  认证提醒: %v\n   (仅做本地目录预览，不影响树状结构展示)\n", err)
+		fmt.Printf("⚠️  %v\n   运行 'wikitnow auth setup' 可快速完成配置\n   (本次仅预览本地文件树)\n", err)
 	}
 
 	client := feishu.NewClient(authManager, debug)
@@ -114,16 +114,20 @@ func runSync(args []string) {
 	var spaceID string
 
 	if wikiURL != "" {
-		extractedSpace, extractedParent, err := prov.ExtractRoot(wikiURL)
-		if err != nil {
-			fmt.Printf("❌ URL 解析与提取失败: %v\n", err)
-			os.Exit(1)
-		}
-		spaceID = extractedSpace
-		parentNodeToken = extractedParent
+		if authManager == nil {
+			fmt.Println("⚠️  无凭证，跳过目标节点查询，仅展示本地文件树")
+		} else {
+			extractedSpace, extractedParent, err := prov.ExtractRoot(wikiURL)
+			if err != nil {
+				fmt.Printf("❌ URL 解析与提取失败: %v\n", err)
+				os.Exit(1)
+			}
+			spaceID = extractedSpace
+			parentNodeToken = extractedParent
 
-		fmt.Printf("🔗 提取到父节点 Token: %s\n", parentNodeToken)
-		fmt.Printf("📁 目标知识库 Space ID: %s\n", spaceID)
+			fmt.Printf("🔗 提取到父节点 Token: %s\n", parentNodeToken)
+			fmt.Printf("📁 目标知识库 Space ID: %s\n", spaceID)
+		}
 	}
 
 	engine := sync.NewEngine(prov, localPath, !apply, useCodeBlock)

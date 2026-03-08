@@ -140,9 +140,9 @@ func (e *Engine) getDirStatus(dirPath string) string {
 	if e.ignorer.ShouldIgnore(dirPath, true) {
 		return "🚫 忽略"
 	}
-	// 检查目录内是否有实际可序内容
+	// 检查目录内是否有实际可同步的内容
 	if !e.hasEffectiveContent(dirPath) {
-		return "🚫 空目录"
+		return "🚫 忽略"
 	}
 	return "📁 将同步"
 }
