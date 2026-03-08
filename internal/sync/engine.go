@@ -247,7 +247,7 @@ func (e *Engine) buildDirTree(dirPath, spaceID, parentNodeToken, prefix string, 
 			}
 			*nodes = append(*nodes, node)
 
-			if status == "✅ 将同步" {
+			if status == "📁 将同步" {
 				if err := e.buildDirTree(childPath, spaceID, dirNodeToken, nextPrefix, nodes); err != nil {
 					// 仅记录到终端防崩溃
 					fmt.Printf("❌ 获取分支目录失败 %s: %v\n", childPath, err)
