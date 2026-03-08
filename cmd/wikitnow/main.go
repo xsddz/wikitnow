@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,14 +27,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  provider  查看支持的知识库平台\n")
 		fmt.Fprintf(os.Stderr, "  config    配置管理\n\n")
 		fmt.Fprintf(os.Stderr, "示例:\n")
-		fmt.Fprintf(os.Stderr, "  %s sync ./docs                                        # 安全预览将要同步的本地结构\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s sync ./docs https://your-wiki-url                  # 安全预览（含目标节点信息）\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s sync ./docs https://your-wiki-url --apply          # 确认无误，执行真实推送\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s auth setup                                         # 交互式配置平台凭证\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s auth check                                         # 验证凭证是否有效\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s provider list                                      # 查看支持的平台\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s config show-ignore                                 # 查看当前生效的排除规则\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s config init-ignore                                 # 在当前目录生成 .wikitnow/ignore\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s sync ./docs                                             # 安全预览本地结构\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s sync ./docs --target https://your-wiki-url              # 执行真实推送\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s sync ./docs ./guides --target https://your-wiki-url     # 多路径推送\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s auth setup                                              # 交互式配置平台凭证\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s auth check                                              # 验证凭证是否有效\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s provider list                                           # 查看支持的平台\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s config show-ignore                                      # 查看当前生效的排除规则\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s config init-ignore                                      # 在当前目录生成 .wikitnow/ignore\n\n", os.Args[0])
 	}
 
 	flag.Parse()
@@ -62,14 +64,14 @@ func main() {
 // runSync 处理 sync 子命令
 func runSync(args []string) {
 	syncCmd := flag.NewFlagSet("sync", flag.ExitOnError)
-	var apply bool
+	var target string
 	var useCodeBlock bool
 	var debug bool
-	syncCmd.BoolVar(&apply, "apply", false, "确认执行同步，向目标平台发起真实的创建和写入请求（默认行为是只读的安全预览）")
+	syncCmd.StringVar(&target, "target", "", "目标知识库 Wiki URL，指定后执行真实写入（不指定则为安全预览模式）")
 	syncCmd.BoolVar(&useCodeBlock, "code-block", true, "对于文本文件，是否将其内容使用代码块包裹插入（默认 true）。设为 false 则插入纯文本")
 	syncCmd.BoolVar(&debug, "debug", false, "调试模式：将每次 HTTP 请求的方法和 URL 打印到 stderr")
 
-	// 为支持 flags 写在位置参数之后（如 sync ./docs URL --apply），
+	// 为支持 flags 写在位置参数之后（如 sync ./docs --target URL），
 	// 预先将所有 flag 参数（-- 或 - 开头）重排到位置参数前面。
 	var flagArgs, posArgs []string
 	for _, a := range args {
@@ -80,30 +82,27 @@ func runSync(args []string) {
 		}
 	}
 	syncCmd.Parse(append(flagArgs, posArgs...))
-	syncArgs := syncCmd.Args()
+	localPaths := syncCmd.Args()
 
-	if len(syncArgs) < 1 {
+	if len(localPaths) < 1 {
 		fmt.Fprintln(os.Stderr, "❌ 错误: 必须提供 <本地路径>")
-		fmt.Fprintf(os.Stderr, "用法: wikitnow sync <本地路径> [Wiki URL] [--apply] [--code-block=false]\n")
+		fmt.Fprintf(os.Stderr, "用法: wikitnow sync <本地路径> [本地路径...] [--target <Wiki URL>] [--code-block=false]\n")
 		os.Exit(1)
 	}
 
-	localPath := syncArgs[0]
-	var wikiURL string
-	if len(syncArgs) >= 2 {
-		wikiURL = syncArgs[1]
-	}
-
-	if apply && wikiURL == "" {
-		fmt.Fprintln(os.Stderr, "❌ 错误: 使用 --apply 进行真实同步时，必须提供目标 <Wiki URL>")
-		os.Exit(1)
+	apply := target != ""
+	if apply {
+		if err := validateWikiURL(target); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ --target 参数无效: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	authManager, err := auth.NewTokenManager()
 	if err != nil && apply {
 		fmt.Printf("❌ 认证错误: %v\n", err)
 		os.Exit(1)
-	} else if err != nil && !apply {
+	} else if err != nil {
 		fmt.Printf("⚠️  %v\n   运行 'wikitnow auth setup' 可快速完成配置\n   (本次仅预览本地文件树)\n", err)
 	}
 
@@ -113,35 +112,50 @@ func runSync(args []string) {
 	var parentNodeToken string
 	var spaceID string
 
-	if wikiURL != "" {
-		if authManager == nil {
-			fmt.Println("⚠️  无凭证，跳过目标节点查询，仅展示本地文件树")
-		} else {
-			extractedSpace, extractedParent, err := prov.ExtractRoot(wikiURL)
-			if err != nil {
-				fmt.Printf("❌ URL 解析与提取失败: %v\n", err)
-				os.Exit(1)
-			}
-			spaceID = extractedSpace
-			parentNodeToken = extractedParent
+	if apply {
+		extractedSpace, extractedParent, err := prov.ExtractRoot(target)
+		if err != nil {
+			fmt.Printf("❌ 目标节点提取失败: %v\n", err)
+			os.Exit(1)
+		}
+		spaceID = extractedSpace
+		parentNodeToken = extractedParent
 
-			fmt.Printf("🔗 提取到父节点 Token: %s\n", parentNodeToken)
-			fmt.Printf("📁 目标知识库 Space ID: %s\n", spaceID)
+		fmt.Printf("🔗 提取到父节点 Token: %s\n", parentNodeToken)
+		fmt.Printf("📁 目标知识库 Space ID: %s\n\n", spaceID)
+	}
+
+	for _, localPath := range localPaths {
+		engine := sync.NewEngine(prov, localPath, !apply, useCodeBlock)
+		if err := engine.Sync(localPath, spaceID, parentNodeToken); err != nil {
+			fmt.Printf("❌ 同步中断 [%s]: %v\n", localPath, err)
+			os.Exit(1)
 		}
 	}
 
-	engine := sync.NewEngine(prov, localPath, !apply, useCodeBlock)
-	err = engine.Sync(localPath, spaceID, parentNodeToken)
-	if err != nil {
-		fmt.Printf("❌ 同步中断: %v\n", err)
-		os.Exit(1)
-	}
-
 	if !apply {
-		fmt.Println("\n✅ 预览结束。如需真实写入，请提供 Wiki URL 并追加 --apply 参数。")
+		fmt.Println("\n✅ 预览结束。如需真实写入，请追加 --target <Wiki URL>。")
 	} else {
 		fmt.Println("\n✅ 同步完成")
 	}
+}
+
+// validateWikiURL 对 Wiki URL 做基础合法性校验，在调用远端 API 之前拦截明显错误。
+func validateWikiURL(rawURL string) error {
+	if rawURL == "" {
+		return errors.New("URL 不能为空")
+	}
+	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
+		return errors.New("URL 必须以 http:// 或 https:// 开头，请检查输入")
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("URL 格式不合法: %w", err)
+	}
+	if u.Host == "" {
+		return errors.New("URL 缺少域名部分，请检查输入")
+	}
+	return nil
 }
 
 // runAuth 处理 auth 子命令

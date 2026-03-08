@@ -39,11 +39,11 @@ curl -fsSL https://raw.githubusercontent.com/xsddz/wikitnow/main/scripts/install
 # 2. Configure credentials (interactive, writes to ~/.wikitnow/config.json)
 wikitnow auth setup
 
-# 3. Safe Preview (Wiki URL is optional; when provided, also shows target node info)
-wikitnow sync ./docs/guide.md "https://my.feishu.cn/wiki/wikcnXyz123..."
+# 3. Safe Preview (omit --target to enter read-only preview mode)
+wikitnow sync ./docs/guide.md
 
-# 4. Recursively synchronize a directory and actually apply changes
-wikitnow sync ./src "https://my.feishu.cn/wiki/wikcnXyz123..." --apply
+# 4. Recursively synchronize a directory and actually push to wiki
+wikitnow sync ./src --target "https://my.feishu.cn/wiki/wikcnXyz123..."
 ```
 
 ## 📋 Requirements
@@ -136,14 +136,20 @@ wikitnow auth check
 wikitnow provider list
 
 # -- Sync ---------------------------------------------------------
-# Safe Preview: show what would be synced (Wiki URL optional)
-wikitnow sync <local-path> [wiki-url]
+# Safe Preview: show what would be synced (omit --target for read-only preview)
+wikitnow sync <local-path>
 
-# Execute Sync: create nodes and upload to wiki (Wiki URL required)
-wikitnow sync <local-path> <wiki-url> --apply
+# Multi-path preview
+wikitnow sync <local-path1> <local-path2>
+
+# Execute Sync: create nodes and upload to wiki (--target required)
+wikitnow sync <local-path> --target <wiki-url>
+
+# Multi-path push
+wikitnow sync <local-path1> <local-path2> --target <wiki-url>
 
 # Sync text files without code block wrapping
-wikitnow sync <local-path> <wiki-url> --apply --code-block=false
+wikitnow sync <local-path> --target <wiki-url> --code-block=false
 
 # -- Config -------------------------------------------------------
 # Show currently active exclusion rules and their source path

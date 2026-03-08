@@ -39,11 +39,11 @@ curl -fsSL https://raw.githubusercontent.com/xsddz/wikitnow/main/scripts/install
 # 2. 配置平台凭证（交互式，自动写入 ~/.wikitnow/config.json）
 wikitnow auth setup
 
-# 3. 安全预览（Wiki URL 可省略；提供时额外显示目标节点信息）
-wikitnow sync ./docs/guide.md "https://my.feishu.cn/wiki/wikcnXyz123..."
+# 3. 安全预览（不指定 --target 时默认进入只读预览模式）
+wikitnow sync ./docs/guide.md
 
 # 4. 确认无误，递归将整个目录正式推送到知识库
-wikitnow sync ./src "https://my.feishu.cn/wiki/wikcnXyz123..." --apply
+wikitnow sync ./src --target "https://my.feishu.cn/wiki/wikcnXyz123..."
 ```
 
 ## 📋 运行要求
@@ -136,14 +136,20 @@ wikitnow auth check
 wikitnow provider list
 
 # ── 同步发布 ────────────────────────────────────────────────
-# 安全预览：展示将要同步的文件树结构（Wiki URL 可省略；提供时额外显示目标节点信息）
-wikitnow sync <本地路径> [Wiki URL]
+# 安全预览：展示将要同步的文件树结构（不填 --target 则进入只读预览模式）
+wikitnow sync <本地路径>
 
-# 正式执行：建立节点架构并将本地数据覆盖性发布到知识库（Wiki URL 必填）
-wikitnow sync <本地目录> <Wiki URL> --apply
+# 多路径预览
+wikitnow sync <本地路径1> <本地路径2>
+
+# 正式执行：建立节点架构并将本地数据发布到知识库（需指定 --target）
+wikitnow sync <本地目录> --target <Wiki URL>
+
+# 多路径推送
+wikitnow sync <本地目录1> <本地目录2> --target <Wiki URL>
 
 # 纯文本上传：对于文本文件，不使用代码块包裹内容直接排版
-wikitnow sync <本地目录> <Wiki URL> --apply --code-block=false
+wikitnow sync <本地目录> --target <Wiki URL> --code-block=false
 
 # ── 配置管理 ────────────────────────────────────────────────
 # 查看当前生效的排除规则及来源路径
