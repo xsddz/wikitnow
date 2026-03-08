@@ -5,7 +5,7 @@
 <h1 align="center">wikitnow</h1>
 
 <p align="center">
-  <strong>Wiki It Now 🚀</strong> — Publish your local Markdown notes to a cloud knowledge base
+  <strong>现在就把它 Wiki 化！🚀</strong> — 本地 Markdown 一键发布到云端知识库
 </p>
 
 <p align="center">
@@ -15,46 +15,46 @@
 </p>
 
 <p align="center">
-  English | <a href="README.zh-CN.md">中文</a>
+  <a href="README.en.md">English</a> | 中文
 </p>
 
 ---
 
-## ✨ Features
+## ✨ 特性
 
-- 🏗️ **Wiki Builder**: Maps your local directory tree 1:1 into a cloud wiki hierarchy
-- 🖥️ **Cross-platform**: Native binaries for macOS, Linux, and Windows
-- 📂 **Smart Traversal**: Handles single files or full directory tree recursion automatically
-- 🛡️ **Git-style Ignore**: `.wikitnow/ignore` with standard `.gitignore` glob syntax
-- ⚡ **Zero-dependency**: Single standalone binary, no runtime required
-- 🔒 **Safe By Default**: Dry-run preview by default; `--apply` to write
-- 🔌 **Extensible**: Provider interface — currently supports Feishu (Lark)
+- 🏗️ **极速建库**：一键将本地目录树 1:1 映射为云端知识库层级节点
+- 🖥️ **跨平台**：macOS、Linux、Windows 原生二进制
+- 📂 **智能分析**：自动识别单文件发布或目录树递归构建
+- 🛡️ **Git 风格排除**：支持 `.wikitnow/ignore`，语法完全兼容 `.gitignore`
+- ⚡ **开箱即用**：Go 编译，单一无依赖二进制
+- 🔒 **默认安全**：默认只读预览，`--apply` 才触发实际写操作
+- 🔌 **可扩展**：Provider 接口设计，当前支持飞书（Lark）
 
-## 🚀 Quick Start
+## 🚀 快速开始
 
 ```bash
-# 1. Install (one-line for macOS/Linux)
+# 1. 一键安装 (macOS/Linux)
 curl -fsSL https://raw.githubusercontent.com/xsddz/wikitnow/main/scripts/install.sh | bash
 
-# 2. Configure Credentials (using Feishu as example)
-export FEISHU_APP_ID="cli_a1b2..."
+# 2. 配置平台凭证（以飞书为例）
+export FEISHU_APP_ID="cli_a1b2c3d4e5f6"
 export FEISHU_APP_SECRET="your_app_secret_here"
 
-# 3. Safe Preview (Wiki URL is optional; when provided, also shows target node info)
+# 3. 安全预览（Wiki URL 可省略；提供时额外显示目标节点信息）
 wikitnow sync ./docs/guide.md "https://my.feishu.cn/wiki/wikcnXyz123..."
 
-# 4. Recursively synchronize a directory and actually apply changes
+# 4. 确认无误，递归将整个目录正式推送到知识库
 wikitnow sync ./src "https://my.feishu.cn/wiki/wikcnXyz123..." --apply
 ```
 
-## 📋 Requirements
+## 📋 运行要求
 
-- Go 1.21+ (for building from source)
-- Network access to the target platform APIs
+- Go 1.21+ (用于源码编译)
+- 能够正常访问目标平台 API 的网络环境
 
-## 📦 Installation
+## 📦 安装方式
 
-### From Source
+### 源码编译
 
 ```bash
 git clone https://github.com/xsddz/wikitnow.git
@@ -63,65 +63,63 @@ make build
 sudo mv bin/wikitnow /usr/local/bin/
 ```
 
-### Cross-compilation
+### 交叉编译
 
 ```bash
 make build-all
 
-# Alternatively, manual cross-compilation:
+# 或手动交叉编译:
 # GOOS=linux GOARCH=amd64 go build -o bin/wikitnow-linux-amd64 ./cmd/wikitnow
 ```
 
-## 🛠️ Development
+## 🛠️ 本地开发
 
 ```bash
-go test ./...        # Run tests
-make build           # Build binary
-make build-all       # Cross-platform build
+go test ./...        # 运行单元测试
+make build           # 编译本地二进制文件
+make build-all       # 一键跨平台交叉编译
 ```
 
-## ⚙️ Configuration
+## ⚙️ 配置说明
 
-### Authentication
+### 凭证配置
 
-| Priority | Source | Best For |
-|----------|--------|----------|
-| High | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` env vars | CI/CD, automation |
-| Low | `~/.wikitnow/credentials.json` | Local development |
+| 优先级 | 来源 | 适用场景 |
+|--------|------|---------|
+| 高 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 环境变量 | CI/CD、脚本自动化 |
+| 低 | `~/.wikitnow/credentials.json` | 本地开发 |
 
-### File Exclusion (`.wikitnow/ignore`)
+### 排除规则配置（`.wikitnow/ignore`）
 
-Create a `.wikitnow/ignore` file to specify files and directories to skip. The syntax is identical to `.gitignore`.
-
-**Lookup priority (first match wins):**
+语法与 `.gitignore` 完全兼容。**查找优先级（自高向低，找到即停）**：
 
 ```
-<sync-dir>/.wikitnow/ignore    ← project-level, highest priority
-parent dirs (ascending)/.wikitnow/ignore
-~/.wikitnow/ignore               ← user global config
-/usr/local/etc/wikitnow/ignore  ← system default (installed with binary)
+<同步目录>/.wikitnow/ignore    ← 项目级，优先级最高
+父目录（逐级向上）/.wikitnow/ignore
+~/.wikitnow/ignore               ← 用户全局配置
+/usr/local/etc/wikitnow/ignore  ← 系统默认（随命令安装）
 ```
 
-> Hidden files (starting with `.`) are always skipped regardless of config.
+> 找到即停，该文件完全接管排除逻辑，不与其他层叠加。隐藏文件（以 `.` 开头）始终被跳过。
 
-📖 See [docs/configuration.md](docs/configuration.md) for details.
+📖 详细说明见 [docs/configuration.md](docs/configuration.md)
 
-## 📖 Usage
+## 📖 使用方法
 
 ```bash
-# Show help
+# 显示帮助信息
 wikitnow -h
 
-# Safe Preview: show what would be synced (Wiki URL optional)
-wikitnow sync <local-path> [wiki-url]
+# 安全预览：展示将要同步的文件树结构（Wiki URL 可省略；提供时额外显示目标节点信息）
+wikitnow sync <本地路径> [Wiki URL]
 
-# Execute Sync: create nodes and upload to wiki (Wiki URL required)
-wikitnow sync <local-path> <wiki-url> --apply
+# 正式执行：建立节点架构并将本地数据覆盖性发布到知识库（Wiki URL 必填）
+wikitnow sync <本地目录> <Wiki URL> --apply
 
-# Sync text files without code block wrapping
-wikitnow sync <local-path> <wiki-url> --apply --code-block=false
+# 纯文本上传：对于文本文件，不使用代码块包裹内容直接排版
+wikitnow sync <本地目录> <Wiki URL> --apply --code-block=false
 ```
 
-## 📝 License
+## 📝 开源协议
 
 [MIT License](LICENSE)
