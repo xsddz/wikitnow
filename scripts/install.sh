@@ -56,16 +56,27 @@ else
     exit 1
 fi
 
-# Initialize user-level ignore rules (~/.wikitnow/ignore) if not already present
-if [ ! -f "$HOME/.wikitnow/ignore" ]; then
-    echo "Initializing default ignore rules to ~/.wikitnow/ignore..."
-    (cd ~ && "$INSTALL_DIR/$BIN_NAME" config init-ignore)
+# Install system-level default ignore rules
+SYSTEM_CONFIG_DIR="/usr/local/etc/wikitnow"
+SYSTEM_IGNORE_FILE="$SYSTEM_CONFIG_DIR/ignore"
+
+echo "Installing system-level default ignore rules to $SYSTEM_IGNORE_FILE..."
+if [ -w "$SYSTEM_CONFIG_DIR" ] 2>/dev/null || sudo mkdir -p "$SYSTEM_CONFIG_DIR" 2>/dev/null; then
+    if [ -w "$SYSTEM_CONFIG_DIR" ]; then
+        mkdir -p "$SYSTEM_CONFIG_DIR"
+        (cd "$SYSTEM_CONFIG_DIR" && "$INSTALL_DIR/$BIN_NAME" config init-ignore --force)
+    else
+        sudo mkdir -p "$SYSTEM_CONFIG_DIR"
+        (cd "$SYSTEM_CONFIG_DIR" && sudo "$INSTALL_DIR/$BIN_NAME" config init-ignore --force)
+    fi
+    echo "   System ignore config: $SYSTEM_IGNORE_FILE"
 else
-    echo "   User ignore config ~/.wikitnow/ignore already exists, keeping existing file."
+    echo "   Warning: Cannot create $SYSTEM_CONFIG_DIR, skipping system-level config."
 fi
 
 echo "✅ $BIN_NAME installed successfully!"
-echo "   Binary:  $INSTALL_DIR/$BIN_NAME"
-echo "   Config:  ~/.wikitnow/ignore"
+echo "   Binary:        $INSTALL_DIR/$BIN_NAME"
+echo "   System config: $SYSTEM_IGNORE_FILE"
 echo ""
 echo "Run '$BIN_NAME -h' to get started."
+echo "To customize ignore rules, run: $BIN_NAME config init-ignore"
