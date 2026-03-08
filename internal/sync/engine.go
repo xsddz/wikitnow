@@ -98,7 +98,7 @@ func (e *Engine) collectNodes(localPath, spaceID, parentNodeToken string) ([]*tr
 		nodes = append(nodes, &treeNode{
 			displayStr: localPath,
 			displayLen: displayWidth(localPath),
-			statusStr:  "📦 根目录",
+			statusStr:  "✅ 将同步",
 			isDir:      true,
 		})
 		err = e.buildDirTree(localPath, spaceID, parentNodeToken, "", &nodes)
@@ -149,7 +149,7 @@ func (e *Engine) getDirStatus(dirPath string) string {
 	if !e.hasEffectiveContent(dirPath) {
 		return "🚫 忽略"
 	}
-	return "📁 将同步"
+	return "✅ 将同步"
 }
 
 // hasEffectiveContent 递归检查一个目录是否有至少一个实际可同步的文件
@@ -247,7 +247,7 @@ func (e *Engine) buildDirTree(dirPath, spaceID, parentNodeToken, prefix string, 
 			}
 			*nodes = append(*nodes, node)
 
-			if status == "📁 将同步" {
+			if status == "✅ 将同步" {
 				if err := e.buildDirTree(childPath, spaceID, dirNodeToken, nextPrefix, nodes); err != nil {
 					// 仅记录到终端防崩溃
 					fmt.Printf("❌ 获取分支目录失败 %s: %v\n", childPath, err)

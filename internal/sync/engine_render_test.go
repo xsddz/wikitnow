@@ -24,7 +24,7 @@ func TestRenderNodes(t *testing.T) {
 		{
 			name: "目录+子文件+同级文件跨路径对齐",
 			nodes: []*treeNode{
-				{displayStr: "docs", displayLen: 4, statusStr: "📦 根目录"},
+				{displayStr: "docs", displayLen: 4, statusStr: "✅ 将同步"},
 				{displayStr: "├── configuration.md", displayLen: 20, statusStr: "✅ 将同步"},
 				{displayStr: "README.en.md", displayLen: 12, statusStr: "✅ 将同步"},
 				{displayStr: "README.md", displayLen: 9, statusStr: "✅ 将同步"},
@@ -34,7 +34,7 @@ func TestRenderNodes(t *testing.T) {
 			// "docs"(4): padding=20, "├── configuration.md"(20): padding=4
 			// "README.en.md"(12): padding=12, "README.md"(9): padding=15
 			wantLines: []string{
-				"docs                    [📦 根目录]",
+				"docs                    [✅ 将同步]",
 				"├── configuration.md    [✅ 将同步]",
 				"README.en.md            [✅ 将同步]",
 				"README.md               [✅ 将同步]",
@@ -57,16 +57,16 @@ func TestRenderNodes(t *testing.T) {
 		{
 			name: "多层嵌套目录前缀对齐",
 			nodes: []*treeNode{
-				{displayStr: "src", displayLen: 3, statusStr: "📦 根目录"},
-				{displayStr: "├── cmd", displayLen: 7, statusStr: "📁 将同步"},
+				{displayStr: "src", displayLen: 3, statusStr: "✅ 将同步"},
+				{displayStr: "├── cmd", displayLen: 7, statusStr: "✅ 将同步"},
 				{displayStr: "│   └── main.go", displayLen: 15, statusStr: "✅ 将同步"},
 				{displayStr: "└── README.md", displayLen: 13, statusStr: "✅ 将同步"},
 			},
 			padWidth: 19,
 			// maxLen=15, padWidth=19
 			wantLines: []string{
-				"src                [📦 根目录]",
-				"├── cmd            [📁 将同步]",
+				"src                [✅ 将同步]",
+				"├── cmd            [✅ 将同步]",
 				"│   └── main.go    [✅ 将同步]",
 				"└── README.md      [✅ 将同步]",
 			},
@@ -102,8 +102,8 @@ func TestRenderNodes(t *testing.T) {
 func TestRenderNodesGlobalAlignment(t *testing.T) {
 	// 模拟 docs + README.en.md + README.md 的混合场景
 	allNodes := []*treeNode{
-		{displayStr: "docs", displayLen: 4, statusStr: "📦 根目录"},
-		{displayStr: "├── aaa", displayLen: 7, statusStr: "📁 将同步"},
+		{displayStr: "docs", displayLen: 4, statusStr: "✅ 将同步"},
+		{displayStr: "├── aaa", displayLen: 7, statusStr: "✅ 将同步"},
 		{displayStr: "│   └── b.md", displayLen: 12, statusStr: "✅ 将同步"},
 		{displayStr: "└── configuration.md", displayLen: 20, statusStr: "✅ 将同步"},
 		{displayStr: "README.en.md", displayLen: 12, statusStr: "✅ 将同步"},
