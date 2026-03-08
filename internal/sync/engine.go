@@ -47,75 +47,80 @@ func NewEngine(p provider.Provider, baseDir string, dryRun bool, useCodeBlock bo
 	}
 }
 
-// Sync 执行目录或文件同步
-// localPath: 待同步的本地绝对/相对路径
-// spaceID: 知识库空间 ID
-// parentNodeToken: 目标的父节点
+// Sync 执行目录或文件同步（SyncAll 的单路径便捷包装）
 func (e *Engine) Sync(localPath, spaceID, parentNodeToken string) error {
-	info, err := os.Stat(localPath)
-	if err != nil {
-		return err
+	return e.SyncAll([]string{localPath}, spaceID, parentNodeToken)
+}
+
+// SyncAll 将多个本地路径的节点统一收集、全局对齐渲染，并执行上传。
+// 所有路径共享同一个 padWidth，保证跨路径列对齐。
+func (e *Engine) SyncAll(localPaths []string, spaceID, parentNodeToken string) error {
+	var allNodes []*treeNode
+	for _, lp := range localPaths {
+		nodes, err := e.collectNodes(lp, spaceID, parentNodeToken)
+		if err != nil {
+			return err
+		}
+		allNodes = append(allNodes, nodes...)
 	}
 
-	// 准备收集渲染树
-	var nodes []*treeNode
-
-	if info.IsDir() {
-		// 目录：先添加根节点，再递归展开子项
-		nodes = append(nodes, &treeNode{
-			displayStr: localPath,
-			displayLen: utf8.RuneCountInString(localPath),
-			statusStr:  "📦 根目录",
-			isDir:      true,
-		})
-		err = e.buildDirTree(localPath, spaceID, parentNodeToken, "", &nodes)
-	} else {
-		// 单文件：根节点就是文件本身，直接用 buildFileNode 生成一条记录即可
-		err = e.buildFileNode(localPath, spaceID, parentNodeToken, "", &nodes)
-	}
-
-	if err != nil {
-		return err
-	}
-
-	// 计算最长的前缀名，用于排版对齐
 	maxLen := 0
-	for _, n := range nodes {
+	for _, n := range allNodes {
 		if n.displayLen > maxLen {
 			maxLen = n.displayLen
 		}
 	}
-
-	// 在最长长度基础上再加几个空格作为缓冲间距
 	padWidth := maxLen + 4
 
-	// 渲染与执行
-	for _, n := range nodes {
-		// 中文在控制台通常等效于 2 个英文字符的宽度，这里采取一个更精准的 Terminal 渲染填充算法
-		// 但最简单的实现是使用 strings.Repeat 配合 Rune 宽度
-		paddingCount := padWidth - n.displayLen
-		if paddingCount < 1 {
-			paddingCount = 1
-		}
-		padding := strings.Repeat(" ", paddingCount)
+	fmt.Print(renderNodes(allNodes, padWidth))
 
-		// 打印对齐的树
-		fmt.Printf("%s%s[%s]\n", n.displayStr, padding, n.statusStr)
-
-		// 执行真正的上传动作（收集好后顺带执行）
-		if n.originalCfg != nil {
-			if n.isDir {
-				// 目录创建已经在 buildDirTree 时针对非 dry-run 处理完毕，这里如果有别的逻辑可扩展
-			} else {
-				// 尝试上传文件
-				if upErr := e.uploadSingleFile(n.originalCfg); upErr != nil {
-					fmt.Printf("%s  ↳ ❌ 上传错误: %v\n", strings.Repeat(" ", n.displayLen), upErr)
-				}
+	for _, n := range allNodes {
+		if n.originalCfg != nil && !n.isDir {
+			if upErr := e.uploadSingleFile(n.originalCfg); upErr != nil {
+				fmt.Printf("%s  ↳ ❌ 上传错误: %v\n", strings.Repeat(" ", n.displayLen), upErr)
 			}
 		}
 	}
 
 	return nil
+}
+
+// collectNodes 从单个本地路径收集所有渲染节点。
+// 非 dryRun 模式下，目录节点会在此阶段调用 provider.CreateDir 建立远端节点。
+func (e *Engine) collectNodes(localPath, spaceID, parentNodeToken string) ([]*treeNode, error) {
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var nodes []*treeNode
+	if info.IsDir() {
+		nodes = append(nodes, &treeNode{
+			displayStr: localPath,
+			displayLen: displayWidth(localPath),
+			statusStr:  "📦 根目录",
+			isDir:      true,
+		})
+		err = e.buildDirTree(localPath, spaceID, parentNodeToken, "", &nodes)
+	} else {
+		err = e.buildFileNode(localPath, spaceID, parentNodeToken, "", &nodes)
+	}
+	return nodes, err
+}
+
+// renderNodes 将节点列表渲染为对齐的树形文本并返回字符串。
+// padWidth 为全局统一列宽；纯函数，无副作用，可直接单测。
+func renderNodes(nodes []*treeNode, padWidth int) string {
+	var sb strings.Builder
+	for _, n := range nodes {
+		paddingCount := padWidth - n.displayLen
+		if paddingCount < 1 {
+			paddingCount = 1
+		}
+		padding := strings.Repeat(" ", paddingCount)
+		sb.WriteString(fmt.Sprintf("%s%s[%s]\n", n.displayStr, padding, n.statusStr))
+	}
+	return sb.String()
 }
 
 func (e *Engine) getFileStatus(filePath string) string {
@@ -127,7 +132,7 @@ func (e *Engine) getFileStatus(filePath string) string {
 		return "❌ 读取错误"
 	}
 	if info.Size() > 4*1024*1024 {
-		return "⚠️ 跳过 (过大量>4MB)"
+		return "⚠️ 跳过 (超过 4MB)"
 	}
 	content, err := os.ReadFile(filePath)
 	if err == nil && !utf8.Valid(content) {
@@ -179,7 +184,7 @@ func (e *Engine) buildFileNode(filePath, spaceID, parentNodeToken, prefix string
 
 	node := &treeNode{
 		displayStr: display,
-		displayLen: utf8.RuneCountInString(display),
+		displayLen: displayWidth(display),
 		statusStr:  status,
 		isDir:      false,
 	}
@@ -236,13 +241,13 @@ func (e *Engine) buildDirTree(dirPath, spaceID, parentNodeToken, prefix string, 
 			status := e.getDirStatus(childPath)
 			node := &treeNode{
 				displayStr: display,
-				displayLen: utf8.RuneCountInString(display),
+				displayLen: displayWidth(display),
 				statusStr:  status,
 				isDir:      true,
 			}
 			*nodes = append(*nodes, node)
 
-			if status == "📁 将同步" {
+			if status == "✅ 将同步" {
 				if err := e.buildDirTree(childPath, spaceID, dirNodeToken, nextPrefix, nodes); err != nil {
 					// 仅记录到终端防崩溃
 					fmt.Printf("❌ 获取分支目录失败 %s: %v\n", childPath, err)
@@ -268,4 +273,30 @@ func (e *Engine) uploadSingleFile(cfg *uploadConfig) error {
 // Stat 检查前缀
 func Stat(path string) (fs.FileInfo, error) {
 	return os.Stat(path)
+}
+
+// displayWidth 计算字符串在终端中的显示宽度，CJK 字符计为 2 列
+func displayWidth(s string) int {
+	width := 0
+	for _, r := range s {
+		if r >= 0x1100 && (r <= 0x115F || // Hangul Jamo
+			r == 0x2329 || r == 0x232A ||
+			(r >= 0x2E80 && r <= 0x303E) || // CJK Radicals
+			(r >= 0x3040 && r <= 0x33FF) || // Japanese
+			(r >= 0x3400 && r <= 0x4DBF) || // CJK Extension A
+			(r >= 0x4E00 && r <= 0x9FFF) || // CJK Unified
+			(r >= 0xA000 && r <= 0xA4CF) || // Yi
+			(r >= 0xAC00 && r <= 0xD7AF) || // Hangul Syllables
+			(r >= 0xF900 && r <= 0xFAFF) || // CJK Compatibility
+			(r >= 0xFE10 && r <= 0xFE19) ||
+			(r >= 0xFE30 && r <= 0xFE6F) ||
+			(r >= 0xFF00 && r <= 0xFF60) ||
+			(r >= 0xFFE0 && r <= 0xFFE6) ||
+			(r >= 0x1F300 && r <= 0x1F9FF)) { // Emoji
+			width += 2
+		} else {
+			width += 1
+		}
+	}
+	return width
 }

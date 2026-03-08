@@ -150,12 +150,11 @@ func runSync(args []string) {
 		fmt.Printf("📁 目标知识库 Space ID: %s\n\n", spaceID)
 	}
 
-	for _, localPath := range opts.localPaths {
-		engine := sync.NewEngine(prov, localPath, !apply, opts.useCodeBlock)
-		if err := engine.Sync(localPath, spaceID, parentNodeToken); err != nil {
-			fmt.Printf("❌ 同步中断 [%s]: %v\n", localPath, err)
-			os.Exit(1)
-		}
+	// 使用 "." (CWD) 作为 ignorer 的基准目录，以统一处理多路径场景
+	engine := sync.NewEngine(prov, ".", !apply, opts.useCodeBlock)
+	if err := engine.SyncAll(opts.localPaths, spaceID, parentNodeToken); err != nil {
+		fmt.Printf("❌ 同步中断: %v\n", err)
+		os.Exit(1)
 	}
 
 	if !apply {
