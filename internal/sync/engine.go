@@ -60,17 +60,17 @@ func (e *Engine) Sync(localPath, spaceID, parentNodeToken string) error {
 	// 准备收集渲染树
 	var nodes []*treeNode
 
-	// 根节点
-	nodes = append(nodes, &treeNode{
-		displayStr: localPath,
-		displayLen: utf8.RuneCountInString(localPath),
-		statusStr:  "📦 根目录",
-		isDir:      info.IsDir(),
-	})
-
 	if info.IsDir() {
+		// 目录：先添加根节点，再递归展开子项
+		nodes = append(nodes, &treeNode{
+			displayStr: localPath,
+			displayLen: utf8.RuneCountInString(localPath),
+			statusStr:  "📦 根目录",
+			isDir:      true,
+		})
 		err = e.buildDirTree(localPath, spaceID, parentNodeToken, "", &nodes)
 	} else {
+		// 单文件：根节点就是文件本身，直接用 buildFileNode 生成一条记录即可
 		err = e.buildFileNode(localPath, spaceID, parentNodeToken, "", &nodes)
 	}
 
