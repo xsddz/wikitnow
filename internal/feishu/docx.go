@@ -165,12 +165,17 @@ func (c *Client) ReadDocxContent(docToken string) (string, error) {
 }
 
 // ConvertContentToBlocks 将 Markdown 或 HTML 文本转换为文档块。
-// 返回第一层 block ID 列表和完整的 block 索引表，供调用方逐层创建。
-func (c *Client) ConvertContentToBlocks(content string) (firstLevelIDs []string, blockMap map[string]map[string]interface{}, err error) {
+// contentType 支持 "markdown" 或 "html"，返回第一层 block ID 列表和完整的 block 索引表，供调用方逐层创建。
+func (c *Client) ConvertContentToBlocks(content, contentType string) (firstLevelIDs []string, blockMap map[string]map[string]interface{}, err error) {
+	// 验证 contentType 参数
+	if contentType != "markdown" && contentType != "html" {
+		return nil, nil, fmt.Errorf("unsupported contentType: %s, must be 'markdown' or 'html'", contentType)
+	}
+
 	apiURL := fmt.Sprintf("%s/documents/blocks/convert", docxAPIBase)
 	payload := map[string]interface{}{
 		"content":      content,
-		"content_type": "markdown",
+		"content_type": contentType,
 	}
 
 	type responseStruct struct {

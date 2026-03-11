@@ -96,15 +96,36 @@ func (p *FeishuProvider) isMarkdown(filename string) bool {
 	return ext == ".md" || ext == ".markdown"
 }
 
-// uploadMarkdownAsBlocks 将 Markdown 内容写入文档块，遵循飞书「创建嵌套块」API 规范：
-// 1. ConvertContentToBlocks 转换，得到扁平块列表（blocks）和第一层 ID（first_level_block_ids）
-// 2. 对每个块：去掉 parent_id（非 API 字段），去掉 Table.merge_info，清理 Image 只读字段
-// 3. 以 children_id + descendants（扁平列表）格式调用 /descendant 接口，单次最多 1000 块
-// 4. 以 Image BlockID 为 parent_node 上传图片素材，再通过 replace_image 写入 token
+// detectContentType 根据文件名后缀推断内容类型。
+// 支持的后缀：
+//   - .md, .markdown → "markdown"
+//   - .html, .htm    → "html"
+//   - 其他           → "markdown"（默认）
+func (p *FeishuProvider) detectContentType(filename string) string {
+	ext := strings.ToLower(filepath.Ext(filename))
+	switch ext {
+	case ".html", ".htm":
+		return "html"
+	case ".md", ".markdown":
+		return "markdown"
+	default:
+		return "markdown" // 默认为 markdown
+	}
+}
+
+// uploadMarkdownAsBlocks 将 Markdown/HTML 内容写入文档块，遵循飞书「创建嵌套块」API 规范：
+// 1. 根据文件后缀检测 contentType（.html → "html", 其他 → "markdown"）
+// 2. ConvertContentToBlocks 转换，得到扁平块列表（blocks）和第一层 ID（first_level_block_ids）
+// 3. 对每个块：去掉 parent_id（非 API 字段），去掉 Table.merge_info，清理 Image 只读字段
+// 4. 以 children_id + descendants（扁平列表）格式调用 /descendant 接口，单次最多 1000 块
+// 5. 以 Image BlockID 为 parent_node 上传图片素材，再通过 replace_image 写入 token
 func (p *FeishuProvider) uploadMarkdownAsBlocks(docToken, filePath, content string) error {
 	imageSources := extractAllImageSources(content)
 
-	firstLevelIDs, blockMap, err := p.client.ConvertContentToBlocks(content)
+	// 根据文件后缀推断内容类型
+	contentType := p.detectContentType(filePath)
+
+	firstLevelIDs, blockMap, err := p.client.ConvertContentToBlocks(content, contentType)
 	if err != nil {
 		return fmt.Errorf("转换 Markdown 到文档块失败: %w", err)
 	}
