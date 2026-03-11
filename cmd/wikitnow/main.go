@@ -23,6 +23,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "用法: %s <命令> [参数] [flags]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "命令:\n")
 		fmt.Fprintf(os.Stderr, "  sync      将本地文件或目录同步到知识库\n")
+		fmt.Fprintf(os.Stderr, "  pull      从知识库获取文档为 Markdown 文件\n")
 		fmt.Fprintf(os.Stderr, "  auth      管理平台凭证\n")
 		fmt.Fprintf(os.Stderr, "  provider  查看支持的知识库平台\n")
 		fmt.Fprintf(os.Stderr, "  config    配置管理\n\n")
@@ -33,6 +34,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s auth setup                                              # 交互式配置平台凭证\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s auth check                                              # 验证凭证是否有效\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s provider list                                           # 查看支持的平台\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s pull <URL|docToken>                                   # 预览文档内容\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s pull <URL|docToken> --output ./docs/guide.md          # 保存到文件\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s config show-ignore                                      # 查看当前生效的排除规则\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s config init-ignore                                      # 在当前目录生成 .wikitnow/ignore\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s config init-ignore --dest /usr/local/etc/wikitnow/ignore  # 指定输出路径\n\n", os.Args[0])
@@ -55,6 +58,8 @@ func main() {
 		runConfig(args[1:])
 	case "sync":
 		runSync(args[1:])
+	case "pull":
+		runPull(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "❌ 未知命令: %s\n\n", args[0])
 		flag.Usage()
@@ -392,4 +397,165 @@ func findActiveIgnoreFile(systemIgnorePath string) string {
 	}
 
 	return ""
+}
+
+// pullOpts 存放 pull 子命令解析后的参数
+type pullOpts struct {
+	output string // 输出文件路径（不指定则预览）
+	force  bool   // 是否覆盖已有文件
+	lang   string // 语言（zh / en / ja 等）
+	docRef string // 文档引用（URL 或 token）
+}
+
+// parsePullArgs 解析 pull 子命令参数
+func parsePullArgs(args []string) (*pullOpts, error) {
+	if len(args) == 0 {
+		return nil, errors.New("必须提供文档 URL 或 doc_token")
+	}
+
+	opts := &pullOpts{
+		lang:   "zh", // 默认中文
+		docRef: args[0],
+	}
+
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--output" || a == "-output":
+			if i+1 >= len(args) {
+				return nil, errors.New("--output 需要一个参数值")
+			}
+			i++
+			opts.output = args[i]
+		case strings.HasPrefix(a, "--output="):
+			opts.output = strings.TrimPrefix(a, "--output=")
+		case strings.HasPrefix(a, "-output="):
+			opts.output = strings.TrimPrefix(a, "-output=")
+		case a == "--force" || a == "-force":
+			opts.force = true
+		case a == "--lang" || a == "-lang":
+			if i+1 >= len(args) {
+				return nil, errors.New("--lang 需要一个参数值")
+			}
+			i++
+			opts.lang = args[i]
+		case strings.HasPrefix(a, "--lang="):
+			opts.lang = strings.TrimPrefix(a, "--lang=")
+		case strings.HasPrefix(a, "-lang="):
+			opts.lang = strings.TrimPrefix(a, "-lang=")
+		case strings.HasPrefix(a, "-"):
+			return nil, fmt.Errorf("未知参数: %s（用法: wikitnow pull <URL|token> [--output <path>] [--force] [--lang <lang>]）", a)
+		}
+	}
+
+	return opts, nil
+}
+
+// extractTokenFromURL 从 URL 或 token 字符串中提取 doc_token
+func extractTokenFromURL(input string) (string, error) {
+	// 直接 token：22-27 个字符，由字母数字组成
+	if len(input) >= 22 && len(input) <= 27 && isValidToken(input) {
+		return input, nil
+	}
+
+	// 尝试从 URL 中提取：支持多种格式
+	// https://my.feishu.cn/wiki/.../docxABC123...
+	// https://my.feishu.cn/docx/ABC123...
+	// https://feishu.cn/docx/ABC123...
+
+	// 使用简单的方式：从右往左找最长的有效 token 序列
+	parts := strings.FieldsFunc(input, func(r rune) bool {
+		return !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'))
+	})
+
+	// 倒序查找，以获取 URL 末尾最可能是 token 的部分
+	for i := len(parts) - 1; i >= 0; i-- {
+		part := parts[i]
+		if len(part) >= 22 && len(part) <= 27 && isValidToken(part) {
+			return part, nil
+		}
+	}
+
+	return "", fmt.Errorf("无法从输入中提取有效的 doc_token: %s", input)
+}
+
+// isValidToken 检查字符串是否是有效的 token 格式
+func isValidToken(s string) bool {
+	if len(s) < 22 || len(s) > 27 {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
+// runPull 处理 pull 子命令：从云文档获取 Markdown 内容
+func runPull(args []string) {
+	opts, err := parsePullArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ 错误: %v\n", err)
+		os.Exit(1)
+	}
+
+	// 提取 doc_token
+	docToken, err := extractTokenFromURL(opts.docRef)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
+		os.Exit(1)
+	}
+
+	// 获取认证凭证
+	authManager, err := auth.NewTokenManager()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ 认证错误: %v\n", err)
+		fmt.Fprintf(os.Stderr, "   请运行 'wikitnow auth setup' 完成凭证配置\n")
+		os.Exit(1)
+	}
+
+	// 创建客户端
+	client := feishu.NewClient(authManager, false)
+
+	// 获取文档内容
+	content, err := client.GetDocumentContent(docToken, opts.lang)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ 获取文档失败: %v\n", err)
+		fmt.Fprintf(os.Stderr, "   请检查:\n")
+		fmt.Fprintf(os.Stderr, "   1. doc_token 是否正确\n")
+		fmt.Fprintf(os.Stderr, "   2. 应用是否有文档读权限\n")
+		fmt.Fprintf(os.Stderr, "   3. 文档是否已被删除\n")
+		os.Exit(1)
+	}
+
+	// 预览模式：输出到 stdout
+	if opts.output == "" {
+		fmt.Print(content)
+		return
+	}
+
+	// 保存模式：写入文件
+	if _, err := os.Stat(opts.output); err == nil && !opts.force {
+		fmt.Fprintf(os.Stderr, "⚠️  文件已存在: %s\n", opts.output)
+		fmt.Fprintf(os.Stderr, "   若要覆盖，请追加 --force 参数。\n")
+		os.Exit(1)
+	}
+
+	// 创建目录
+	outputDir := filepath.Dir(opts.output)
+	if outputDir != "." && outputDir != "" {
+		if err := os.MkdirAll(outputDir, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ 创建目录失败: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	// 写入文件
+	if err := os.WriteFile(opts.output, []byte(content), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ 写入文件失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("✅ 文档已保存到: %s\n", opts.output)
 }

@@ -139,8 +139,14 @@ func (c *Client) InsertTextBlock(docToken, text string) error {
 	return nil
 }
 
-// ReadDocxContent 简单读取 Docx 文本内容（目前仅获取纯文本 Markdown）
-func (c *Client) ReadDocxContent(docToken string) (string, error) {
+// GetDocumentContent 获取文档的 Markdown 内容。
+// docToken: 文档 token（从 URL 或直接提供）
+// lang: 语言（"zh" 或 "en" 等），默认 "zh"
+func (c *Client) GetDocumentContent(docToken, lang string) (string, error) {
+	if lang == "" {
+		lang = "zh" // 默认中文
+	}
+
 	url := "https://open.feishu.cn/open-apis/docs/v1/content"
 
 	type responseStruct struct {
@@ -154,14 +160,20 @@ func (c *Client) ReadDocxContent(docToken string) (string, error) {
 		SetQueryParam("doc_token", docToken).
 		SetQueryParam("doc_type", "docx").
 		SetQueryParam("content_type", "markdown").
+		SetQueryParam("lang", lang).
 		SetResult(&respBody).
 		Get(url)
 
 	if err := parseResponse(resp, err); err != nil {
-		return "", fmt.Errorf("ReadDocxContent failed: %w", err)
+		return "", fmt.Errorf("GetDocumentContent failed: %w", err)
 	}
 
 	return respBody.Data.Content, nil
+}
+
+// ReadDocxContent 简单读取 Docx 文本内容（目前仅获取纯文本 Markdown，已废弃，请使用 GetDocumentContent）
+func (c *Client) ReadDocxContent(docToken string) (string, error) {
+	return c.GetDocumentContent(docToken, "zh")
 }
 
 // ConvertContentToBlocks 将 Markdown 或 HTML 文本转换为文档块。
