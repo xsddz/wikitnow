@@ -295,6 +295,8 @@ func runConfig(args []string) {
 		fmt.Fprintf(os.Stderr, "可用子命令:\n")
 		fmt.Fprintf(os.Stderr, "  show-ignore            查看当前目录下实际生效的排除规则\n")
 		fmt.Fprintf(os.Stderr, "  init-ignore [--force] [--dest <path>]  在当前目录（或指定路径）生成 .wikitnow/ignore\n")
+		fmt.Fprintf(os.Stderr, "  show-mapping           查看当前同步映射关系\n")
+		fmt.Fprintf(os.Stderr, "  clean-mapping          清空同步映射（完全重新同步）\n")
 		os.Exit(1)
 	}
 
@@ -359,6 +361,48 @@ func runConfig(args []string) {
 		}
 		fmt.Printf("✅ 已生成: %s\n", destFile)
 		fmt.Println("   内容来自默认规则，可按需修改。")
+
+	case "show-mapping":
+		store := sync.LoadMappingStore(".")
+
+		if len(store.Mappings) == 0 {
+			fmt.Println("⚠️  没有找到同步映射")
+			fmt.Println("   运行 wikitnow sync <path> --target <url> 来创建映射")
+			os.Exit(1)
+		}
+
+		fmt.Printf("知识库信息:\n")
+		fmt.Printf("  Space ID:     %s\n", store.SpaceID)
+		fmt.Printf("  Root Token:   %s\n", store.RootNodeToken)
+		fmt.Printf("  同步时间:     %s\n\n", store.SyncedAt.Format("2006-01-02 15:04:05"))
+
+		fmt.Println("文件映射:")
+		fmt.Println()
+
+		for _, record := range store.Mappings {
+			prefix := "📄"
+			if record.IsDir {
+				prefix = "📁"
+			}
+			fmt.Printf("  %s %-30s → %s\n", prefix, record.LocalPath, record.NodeToken)
+		}
+
+		fmt.Printf("\n总计: %d 条映射记录\n", len(store.Mappings))
+
+	case "clean-mapping":
+		fmt.Print("⚠️  确定要清空映射? (y/n): ")
+		reader := bufio.NewReader(os.Stdin)
+		ans, _ := reader.ReadString('\n')
+		if strings.TrimSpace(ans) != "y" {
+			os.Exit(0)
+		}
+
+		store := &sync.MappingStore{
+			Version:  "1.0",
+			Mappings: []sync.MappingRecord{},
+		}
+		store.Save(".")
+		fmt.Println("✅ 映射已清空")
 
 	default:
 		fmt.Fprintf(os.Stderr, "❌ 未知 config 子命令: %s\n", args[0])

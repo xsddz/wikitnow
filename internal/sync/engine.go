@@ -35,15 +35,20 @@ type Engine struct {
 	ignorer      *Ignorer
 	dryRun       bool
 	useCodeBlock bool
+	mapping      *MappingStore
+	baseDir      string
 }
 
 // NewEngine 初始化一个新引擎
 func NewEngine(p provider.Provider, baseDir string, dryRun bool, useCodeBlock bool) *Engine {
+	mapping := LoadMappingStore(baseDir)
 	return &Engine{
 		provider:     p,
 		ignorer:      NewIgnorer(baseDir),
 		dryRun:       dryRun,
 		useCodeBlock: useCodeBlock,
+		mapping:      mapping,
+		baseDir:      baseDir,
 	}
 }
 
@@ -55,6 +60,14 @@ func (e *Engine) Sync(localPath, spaceID, parentNodeToken string) error {
 // SyncAll 将多个本地路径的节点统一收集、全局对齐渲染，并执行上传。
 // 所有路径共享同一个 padWidth，保证跨路径列对齐。
 func (e *Engine) SyncAll(localPaths []string, spaceID, parentNodeToken string) error {
+	// 如果指定了 target（非 dry-run），检查并处理 target 变更
+	if !e.dryRun {
+		if e.mapping.HasDifferentTarget(spaceID, parentNodeToken) {
+			e.mapping.Clear()
+		}
+		e.mapping.UpdateMetadata(spaceID, parentNodeToken)
+	}
+
 	var allNodes []*treeNode
 	for _, lp := range localPaths {
 		nodes, err := e.collectNodes(lp, spaceID, parentNodeToken)
@@ -82,6 +95,11 @@ func (e *Engine) SyncAll(localPaths []string, spaceID, parentNodeToken string) e
 		}
 	}
 
+	// 非 dry-run 模式下保存映射
+	if !e.dryRun {
+		e.mapping.Save(e.baseDir)
+	}
+
 	return nil
 }
 
@@ -95,12 +113,14 @@ func (e *Engine) collectNodes(localPath, spaceID, parentNodeToken string) ([]*tr
 
 	var nodes []*treeNode
 	if info.IsDir() {
+		dirStatus := e.getDirStatus(localPath)
 		nodes = append(nodes, &treeNode{
 			displayStr: localPath,
 			displayLen: displayWidth(localPath),
-			statusStr:  "📁 将同步",
+			statusStr:  dirStatus,
 			isDir:      true,
 		})
+		// 无论目录状态如何，都显示其子文件列表，让用户能看到具体的文件状态
 		err = e.buildDirTree(localPath, spaceID, parentNodeToken, "", &nodes)
 	} else {
 		err = e.buildFileNode(localPath, spaceID, parentNodeToken, "", &nodes)
@@ -147,7 +167,8 @@ func (e *Engine) getDirStatus(dirPath string) string {
 	}
 	// 检查目录内是否有实际可同步的内容
 	if !e.hasEffectiveContent(dirPath) {
-		return "🚫 忽略"
+		// 目录本身没被忽略，但内容都无需同步（被跳过/忽略）
+		return "⏭️  无新文件"
 	}
 	return "📁 将同步"
 }
@@ -165,7 +186,21 @@ func (e *Engine) hasEffectiveContent(dirPath string) bool {
 				return true
 			}
 		} else {
-			if e.getFileStatus(childPath) == "✅ 将同步" {
+			// 检查文件是否真的需要同步
+			status := e.getFileStatus(childPath)
+			if status == "✅ 将同步" {
+				// 检查映射关系：如果已上传且没改变，则不计入需同步的内容
+				relPath, _ := filepath.Rel(e.baseDir, childPath)
+				oldRecord := e.mapping.GetByLocalPath(relPath)
+				if oldRecord != nil {
+					// 文件有映射记录，检查是否改变
+					changed, _ := oldRecord.HasChanged(childPath)
+					if !changed {
+						// 文件未改变，不计入有效内容
+						continue
+					}
+				}
+				// 要么无映射（新文件），要么已改变，都需要同步
 				return true
 			}
 		}
@@ -189,6 +224,20 @@ func (e *Engine) buildFileNode(filePath, spaceID, parentNodeToken, prefix string
 		isDir:      false,
 	}
 
+	// 检查映射关系和文件变更
+	relPath, _ := filepath.Rel(e.baseDir, filePath)
+	oldRecord := e.mapping.GetByLocalPath(relPath)
+	if oldRecord != nil {
+		// 文件已经上传过，检查是否改变
+		changed, _ := oldRecord.HasChanged(filePath)
+		if !changed {
+			// 文件未改变，标记为已同步
+			node.statusStr = "⏭️  已同步"
+			*nodes = append(*nodes, node)
+			return nil
+		}
+	}
+
 	if status == "✅ 将同步" {
 		node.originalCfg = &uploadConfig{
 			filePath:        filePath,
@@ -206,15 +255,22 @@ func (e *Engine) buildDirTree(dirPath, spaceID, parentNodeToken, prefix string, 
 	dirName := filepath.Base(dirPath)
 
 	var dirNodeToken string
+	var dirObjToken string
+
 	if e.dryRun {
 		dirNodeToken = "dry-run-token"
 	} else {
-		// 在遍历提取时，如果不是 dry-run，我们就必须得建立这个目录拿到父级 Token 才能让下面孩子节点传递
+		// 在遍历提取时，创建远端目录节点
 		resNode, err := e.provider.CreateDir(spaceID, parentNodeToken, dirName)
 		if err != nil {
 			return fmt.Errorf("建立远端目录节点失败 %s: %w", dirName, err)
 		}
 		dirNodeToken = resNode.ID
+		dirObjToken = resNode.ObjToken
+
+		// 记录目录映射
+		relPath, _ := filepath.Rel(e.baseDir, dirPath)
+		e.mapping.AddOrUpdate(relPath, dirNodeToken, dirObjToken, true, "")
 	}
 
 	entries, err := os.ReadDir(dirPath)
@@ -247,11 +303,10 @@ func (e *Engine) buildDirTree(dirPath, spaceID, parentNodeToken, prefix string, 
 			}
 			*nodes = append(*nodes, node)
 
-			if status == "📁 将同步" {
-				if err := e.buildDirTree(childPath, spaceID, dirNodeToken, nextPrefix, nodes); err != nil {
-					// 仅记录到终端防崩溃
-					fmt.Printf("❌ 获取分支目录失败 %s: %v\n", childPath, err)
-				}
+			// 无论子目录状态如何，都递归显示其内容，让用户看到完整的文件树
+			if err := e.buildDirTree(childPath, spaceID, dirNodeToken, nextPrefix, nodes); err != nil {
+				// 仅记录到终端防崩溃
+				fmt.Printf("❌ 获取分支目录失败 %s: %v\n", childPath, err)
 			}
 		} else {
 			e.buildFileNode(childPath, spaceID, dirNodeToken, currentPrefix, nodes)
@@ -266,8 +321,18 @@ func (e *Engine) uploadSingleFile(cfg *uploadConfig) error {
 		return nil
 	}
 
-	_, err := e.provider.CreateDocument(cfg.spaceID, cfg.parentNodeToken, cfg.filePath, cfg.fileName, e.useCodeBlock)
-	return err
+	remoteNode, err := e.provider.CreateDocument(cfg.spaceID, cfg.parentNodeToken, cfg.filePath, cfg.fileName, e.useCodeBlock)
+	if err != nil {
+		return err
+	}
+
+	// 计算文件哈希并保存
+	fileHash, _ := ComputeFileHash(cfg.filePath)
+
+	relPath, _ := filepath.Rel(e.baseDir, cfg.filePath)
+	e.mapping.AddOrUpdate(relPath, remoteNode.ID, remoteNode.ObjToken, false, fileHash)
+
+	return nil
 }
 
 // Stat 检查前缀
