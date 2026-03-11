@@ -28,6 +28,7 @@
 - 🛡️ **Git 风格排除**：支持 `.wikitnow/ignore`，语法完全兼容 `.gitignore`
 - ⚡ **开箱即用**：Go 编译，单一无依赖二进制
 - 🔒 **默认安全**：默认只读预览，`--apply` 才触发实际写操作
+- ↔️ **双向同步**：支持本地→云端（sync）和云端→本地（pull）
 - 🔌 **可扩展**：Provider 接口设计，当前支持飞书（Lark）
 
 ## 🚀 快速开始
@@ -150,6 +151,24 @@ wikitnow sync <本地目录1> <本地目录2> --target <Wiki URL>
 
 # 纯文本上传：对于文本文件，不使用代码块包裹内容直接排版
 wikitnow sync <本地目录> --target <Wiki URL> --code-block=false
+
+# ── 文档拉取 ────────────────────────────────────────────────
+# 预览：获取云文档内容并输出到控制台（默认行为）
+wikitnow pull <Wiki URL|docToken>
+
+# 保存到文件：下载云文档为本地 Markdown 文件
+wikitnow pull <Wiki URL|docToken> --output ./backup.md
+
+# 覆盖已有文件
+wikitnow pull <Wiki URL|docToken> --output ./backup.md --force
+
+# 指定语言：用于 @mention 元素的语言（zh/en/ja）
+wikitnow pull <Wiki URL|docToken> --lang en
+
+# 管道支持：可与其他命令组合使用
+wikitnow pull <docToken> | grep -i "关键词"          # 搜索内容
+wikitnow pull <docToken> | head -50                  # 预览前 50 行
+wikitnow pull <docToken> | wc -l                     # 统计行数
 
 # ── 配置管理 ────────────────────────────────────────────────
 # 查看当前生效的排除规则及来源路径
