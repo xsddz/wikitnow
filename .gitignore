@@ -21,3 +21,4 @@ vendor/
 
 # Project specific
 .wikitnow/
+*.old

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -28,16 +29,19 @@ type MappingRecord struct {
 	FileHash  string `json:"file_hash,omitempty"`
 }
 
-// LoadMappingStore 从文件加载映射，支持项目级和全局查找
-// workingDir：工作目录路径（用于向上查找项目级映射）
-// 不存在则返回新的空映射
-func LoadMappingStore(workingDir string) *MappingStore {
-	mappingPath := findMappingFile(workingDir)
+// LoadMappingStore 从文件加载映射，支持项目级和全局查找。
+// 返回 (store, anchorDir)：
+//   - anchorDir 是 relPath 计算的基准根，调用方（Engine）应将 baseDir 设为此值，
+//     以保证 local_path 键与映射文件始终一致，不受当前工作目录影响。
+//
+// workingDir：工作目录路径（用于向上查找项目级映射）；不存在则返回新的空映射。
+func LoadMappingStore(workingDir string) (*MappingStore, string) {
+	mappingPath, anchorDir := findMappingFile(workingDir)
 	if mappingPath == "" {
 		return &MappingStore{
 			Version:  "1.0",
 			Mappings: []MappingRecord{},
-		}
+		}, workingDir
 	}
 
 	data, err := os.ReadFile(mappingPath)
@@ -46,7 +50,7 @@ func LoadMappingStore(workingDir string) *MappingStore {
 		return &MappingStore{
 			Version:  "1.0",
 			Mappings: []MappingRecord{},
-		}
+		}, anchorDir
 	}
 
 	var store MappingStore
@@ -55,32 +59,21 @@ func LoadMappingStore(workingDir string) *MappingStore {
 		return &MappingStore{
 			Version:  "1.0",
 			Mappings: []MappingRecord{},
-		}
+		}, anchorDir
 	}
 
-	return &store
+	return &store, anchorDir
 }
 
 // Save 将映射保存到文件
-// workingDir：工作目录路径
+// workingDir：工作目录路径（传入 e.baseDir，即 anchorDir）
 // 保存策略：
-// 1. 如果项目级映射文件存在，保存到项目级
-// 2. 否则保存到项目目录的 .wikitnow/mapping.json
+// 1. 如果项目级映射文件已存在（workingDir 向上找到），保存到原处
+// 2. 否则兜底到 ~/.wikitnow/mappings/{projectHash}.json，不污染工作目录
 func (s *MappingStore) Save(workingDir string) error {
-	// 首先尝试找到已存在的映射文件
-	existingPath := findMappingFile(workingDir)
-
-	var mappingPath string
-
-	// 如果存在映射文件或文件在项目级位置，使用项目级路径
-	if existingPath != "" && !filepath.HasPrefix(existingPath, filepath.Join(os.Getenv("HOME"), ".wikitnow")) {
-		mappingPath = existingPath
-	} else {
-		// 否则创建项目级映射
-		if workingDir == "" {
-			workingDir = "."
-		}
-		mappingPath = filepath.Join(workingDir, ".wikitnow", "mapping.json")
+	mappingPath, _ := findMappingFile(workingDir)
+	if mappingPath == "" {
+		return fmt.Errorf("无法确定映射文件保存路径（HOME 目录不可访问）")
 	}
 
 	if _, err := getOrCreateMappingDir(mappingPath); err != nil {
@@ -175,44 +168,58 @@ func getProjectHash(absPath string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// findMappingFile 按优先级查找映射文件位置
-// 查找顺序：
-// 1. 从工作目录向上查找 .wikitnow/mapping.json（参考 ignore 文件查找模式）
-// 2. 主目录 ~/.wikitnow/mappings/{projectHash}.json
-func findMappingFile(workingDir string) string {
-	// 第一优先级：项目级映射（从工作目录向上查找）
-	if workingDir != "" {
-		searchPath := workingDir
-		for {
-			candidate := filepath.Join(searchPath, ".wikitnow", "mapping.json")
-			if _, err := os.Stat(candidate); err == nil {
-				return candidate
-			}
+// findFileUpward 从 baseDir 开始向上逐级查找 relPath（相对于各层目录），
+// 找到第一个存在的文件即返回其绝对路径；到达文件系统根目录仍未找到则返回 ""。
+// ignore 和 mapping 均通过此函数完成向上查找，保证机制完全一致。
+func findFileUpward(baseDir, relPath string) string {
+	searchPath := baseDir
+	for {
+		candidate := filepath.Join(searchPath, relPath)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		parent := filepath.Dir(searchPath)
+		if parent == searchPath {
+			return ""
+		}
+		searchPath = parent
+	}
+}
 
-			parent := filepath.Dir(searchPath)
-			if parent == searchPath {
-				break // 到达根目录
-			}
-			searchPath = parent
+// findMappingFile 按优先级查找映射文件位置，同时返回锚定目录（anchorDir）：
+//   - anchorDir 是计算 local_path 相对路径的基准根，确保无论从哪个子目录运行
+//     relPath 都保持一致，不会因 baseDir 不同而产生键冲突或重复条目。
+//
+// 1. 从工作目录向上查找 .wikitnow/mapping.json（与 ignore 查找机制一致）
+//   - mappingPath = 找到的文件路径
+//   - anchorDir  = 含有 .wikitnow/ 的目录（即 `filepath.Dir(filepath.Dir(path))`）
+//
+// 2. 家目录 ~/.wikitnow/mappings/{projectHash}.json（最终兜底）
+//   - anchorDir  = workingDir（每个工作目录独享一个哈希文件，天然隔离）
+func findMappingFile(workingDir string) (string, string) {
+	// 1. 从工作目录向上查找已存在的项目级映射
+	if workingDir != "" {
+		if path := findFileUpward(workingDir, ".wikitnow/mapping.json"); path != "" {
+			// anchorDir = 包含 .wikitnow/ 的目录
+			anchorDir := filepath.Dir(filepath.Dir(path))
+			return path, anchorDir
 		}
 	}
 
-	// 第二优先级：全局映射（主目录）
+	// 2. 家目录兜底：路径始终有效（Save 会按需创建目录和文件）
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ""
+		return "", workingDir
 	}
 
 	// 获取工作目录的绝对路径
 	absPath, err := filepath.Abs(workingDir)
 	if err != nil {
-		return ""
+		return "", workingDir
 	}
 
 	projectHash := getProjectHash(absPath)
-	globalMappingPath := filepath.Join(home, ".wikitnow", "mappings", projectHash+".json")
-
-	return globalMappingPath
+	return filepath.Join(home, ".wikitnow", "mappings", projectHash+".json"), workingDir
 }
 
 // getOrCreateMappingDir 获取或创建映射文件的目录

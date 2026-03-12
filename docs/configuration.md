@@ -51,10 +51,10 @@ wikitnow auth check
 <父目录>/.wikitnow/ignore            ← 支持多级嵌套项目
     │  未找到，继续向上，直到根目录
     ↓
-~/.wikitnow/ignore                   ← 用户全局个性化配置
+~/.wikitnow/ignore                   ← 用户全局，最终兜底
     │  未找到
     ↓
-/usr/local/etc/wikitnow/ignore       ← 系统级默认（随命令安装）
+（无规则，所有文件均同步，隐藏文件除外）
 ```
 
 > 找到任何一个配置文件即停止，该文件**完全**接管排除逻辑，不与其他层叠加。
@@ -82,11 +82,10 @@ node_modules/
 | 场景 | 行为 |
 |------|------|
 | 无任何配置文件 | 所有文件均同步（隐藏文件除外） |
-| 有项目级配置 | 仅使用该文件，系统默认**不生效** |
-| 有用户全局配置 | 仅使用该文件，系统默认**不生效** |
-| 仅有系统默认 | 使用 `/usr/local/etc/wikitnow/ignore`（安装时自动部署） |
+| 有项目级配置 | 仅使用该文件，全局配置**不生效** |
+| 有用户全局配置 | 仅使用该文件，为最终兜底 |
 
-> 若想在项目配置中继续沿用系统默认的大多数规则，可将 `/usr/local/etc/wikitnow/ignore` 的内容复制到项目的 `.wikitnow/ignore` 中，再按需修改。
+> 若想在项目配置中使用默认规则为基础，可运行 `wikitnow config init-ignore` 将内置默认规则生成到项目的 `.wikitnow/ignore` 中，再按需修改。
 
 ### 查看当前生效规则
 
@@ -116,5 +115,4 @@ wikitnow config init-ignore --dest ~/.wikitnow/ignore
 |------|------|----------|
 | `~/.wikitnow/config.json` | 凭证与全局偏好 | `wikitnow auth setup` 或直接编辑 |
 | `<project>/.wikitnow/ignore` | 项目级排除规则 | `wikitnow config init-ignore` 或直接编辑 |
-| `~/.wikitnow/ignore` | 用户全局排除规则 | `wikitnow config init-ignore --dest ~/.wikitnow/ignore` 或直接编辑 |
-| `/usr/local/etc/wikitnow/ignore` | 系统默认排除规则 | 随命令安装，可覆盖 |
+| `~/.wikitnow/ignore` | 用户全局排除规则（最终兜底） | `wikitnow config init-ignore --dest ~/.wikitnow/ignore` 或直接编辑 |

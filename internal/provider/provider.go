@@ -21,4 +21,7 @@ type Provider interface {
 
 	// CreateDocument 在指定空间和父级下创建一个文档记录，并将其本地文件写入知识库
 	CreateDocument(spaceID string, parentID string, filePath string, fileName string, useCodeBlock bool) (*Node, error)
+
+	// UpdateDocument 清空并重写已有文档的内容（objToken 为平台文档的 obj_token）
+	UpdateDocument(objToken string, filePath string, fileName string, useCodeBlock bool) error
 }

@@ -72,6 +72,13 @@ make build-all
 # GOOS=linux GOARCH=amd64 go build -o bin/wikitnow-linux-amd64 ./cmd/wikitnow
 ```
 
+### 卸载
+
+```bash
+# 删除二进制文件及 ~/.wikitnow 配置目录
+curl -fsSL https://raw.githubusercontent.com/xsddz/wikitnow/main/scripts/install.sh | bash -s uninstall
+```
+
 ## 🛠️ 本地开发
 
 ```bash
@@ -112,10 +119,9 @@ make build-all       # 一键跨平台交叉编译
 |--------|------|------|
 | 1 | `<同步目录>/.wikitnow/ignore` | 项目级，优先级最高 |
 | 2 | `<父目录（逐级向上）>/.wikitnow/ignore` | 支持多级嵌套项目 |
-| 3 | `~/.wikitnow/ignore` | 用户全局配置 |
-| 4 | `/usr/local/etc/wikitnow/ignore` | 系统默认（随命令安装） |
+| 3 | `~/.wikitnow/ignore` | 用户全局，最终兜底 |
 
-> 隐藏文件（以 `.` 开头）始终被跳过，不受规则文件影响。
+> 隐藏文件（以 `.` 开头）始终被跳过，不受规则文件影响。若所有路径均不存在，则不应用任何排除规则。
 
 📖 详细说明见 [docs/configuration.md](docs/configuration.md)
 
@@ -174,7 +180,7 @@ wikitnow pull <docToken> | wc -l                     # 统计行数
 # 查看当前生效的排除规则及来源路径
 wikitnow config show-ignore
 
-# 在当前目录生成 .wikitnow/ignore（内容来自系统默认）
+# 在当前目录生成 .wikitnow/ignore（内容来自内置默认规则）
 wikitnow config init-ignore
 
 # 强制覆盖已有文件

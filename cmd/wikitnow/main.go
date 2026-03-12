@@ -288,8 +288,6 @@ func runProvider(args []string) {
 
 // runConfig 处理 config 子命令
 func runConfig(args []string) {
-	const systemIgnorePath = "/usr/local/etc/wikitnow/ignore"
-
 	if len(args) == 0 {
 		fmt.Fprintf(os.Stderr, "用法: wikitnow config <子命令>\n\n")
 		fmt.Fprintf(os.Stderr, "可用子命令:\n")
@@ -302,10 +300,10 @@ func runConfig(args []string) {
 
 	switch args[0] {
 	case "show-ignore":
-		activePath := findActiveIgnoreFile(systemIgnorePath)
+		activePath := findActiveIgnoreFile()
 		if activePath == "" {
 			fmt.Fprintf(os.Stderr, "⚠️  未找到任何 ignore 配置文件\n")
-			fmt.Fprintf(os.Stderr, "   已查找: <当前目录及父目录>/.wikitnow/ignore、~/.wikitnow/ignore、%s\n", systemIgnorePath)
+			fmt.Fprintf(os.Stderr, "   已查找: <当前目录及父目录>/.wikitnow/ignore、~/.wikitnow/ignore\n")
 			fmt.Fprintf(os.Stderr, "   提示: 运行 wikitnow config init-ignore 可在当前目录生成一份。\n")
 			os.Exit(1)
 		}
@@ -344,12 +342,7 @@ func runConfig(args []string) {
 			os.Exit(1)
 		}
 
-		var content []byte
-		if data, err := os.ReadFile(systemIgnorePath); err == nil {
-			content = data
-		} else {
-			content = configs.IgnoreContent
-		}
+		content := configs.IgnoreContent
 
 		if err := os.MkdirAll(destDir, 0755); err != nil {
 			fmt.Fprintf(os.Stderr, "❌ 无法创建目录 %s: %v\n", destDir, err)
@@ -363,7 +356,7 @@ func runConfig(args []string) {
 		fmt.Println("   内容来自默认规则，可按需修改。")
 
 	case "show-mapping":
-		store := sync.LoadMappingStore(".")
+		store, _ := sync.LoadMappingStore(".")
 
 		if len(store.Mappings) == 0 {
 			fmt.Println("⚠️  没有找到同步映射")
@@ -411,8 +404,8 @@ func runConfig(args []string) {
 }
 
 // findActiveIgnoreFile 按优先级链查找当前生效的 ignore 文件路径（找到即返回）。
-// 查找顺序：CWD 向上逐级 → 用户全局 → 系统默认
-func findActiveIgnoreFile(systemIgnorePath string) string {
+// 查找顺序：CWD 向上逐级 → 用户全局（~/.wikitnow/ignore，最终兜底）
+func findActiveIgnoreFile() string {
 	cwd, err := os.Getwd()
 	if err == nil {
 		searchPath := cwd
@@ -434,10 +427,6 @@ func findActiveIgnoreFile(systemIgnorePath string) string {
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}
-	}
-
-	if _, err := os.Stat(systemIgnorePath); err == nil {
-		return systemIgnorePath
 	}
 
 	return ""

@@ -28,6 +28,7 @@
 - 🛡️ **Git-style Ignore**: `.wikitnow/ignore` with standard `.gitignore` glob syntax
 - ⚡ **Zero-dependency**: Single standalone binary, no runtime required
 - 🔒 **Safe By Default**: Dry-run preview by default; `--apply` to write
+- ↔️ **Two-way Sync**: Local→cloud (sync) and cloud→local (pull)
 - 🔌 **Extensible**: Provider interface — currently supports Feishu (Lark)
 
 ## 🚀 Quick Start
@@ -71,6 +72,13 @@ make build-all
 # GOOS=linux GOARCH=amd64 go build -o bin/wikitnow-linux-amd64 ./cmd/wikitnow
 ```
 
+### Uninstall
+
+```bash
+# Remove the binary and ~/.wikitnow config directory
+curl -fsSL https://raw.githubusercontent.com/xsddz/wikitnow/main/scripts/install.sh | bash -s uninstall
+```
+
 ## 🛠️ Development
 
 ```bash
@@ -111,10 +119,9 @@ Syntax is fully compatible with `.gitignore`. Lookup stops at the **first match 
 |----------|------|-------------|
 | 1 | `<sync-dir>/.wikitnow/ignore` | Project-level, highest priority |
 | 2 | `<parent dirs (ascending)>/.wikitnow/ignore` | Supports nested projects |
-| 3 | `~/.wikitnow/ignore` | User global config |
-| 4 | `/usr/local/etc/wikitnow/ignore` | System default (installed with binary) |
+| 3 | `~/.wikitnow/ignore` | User global, final fallback |
 
-> Hidden files (starting with `.`) are always skipped, regardless of rules.
+> Hidden files (starting with `.`) are always skipped, regardless of rules. If no config file exists at any level, no exclusion rules are applied.
 
 📖 See [docs/configuration.md](docs/configuration.md) for details.
 
@@ -151,11 +158,29 @@ wikitnow sync <local-path1> <local-path2> --target <wiki-url>
 # Sync text files without code block wrapping
 wikitnow sync <local-path> --target <wiki-url> --code-block=false
 
+# -- Pull ---------------------------------------------------------
+# Preview: fetch cloud document content and print to stdout (default)
+wikitnow pull <wiki-url|docToken>
+
+# Save to file: download cloud document as local Markdown
+wikitnow pull <wiki-url|docToken> --output ./backup.md
+
+# Overwrite existing file
+wikitnow pull <wiki-url|docToken> --output ./backup.md --force
+
+# Specify language for @mention elements (zh/en/ja)
+wikitnow pull <wiki-url|docToken> --lang en
+
+# Pipeline support
+wikitnow pull <docToken> | grep -i "keyword"     # search content
+wikitnow pull <docToken> | head -50              # preview first 50 lines
+wikitnow pull <docToken> | wc -l                 # count lines
+
 # -- Config -------------------------------------------------------
 # Show currently active exclusion rules and their source path
 wikitnow config show-ignore
 
-# Generate .wikitnow/ignore in the current directory
+# Generate .wikitnow/ignore in the current directory (content from built-in defaults)
 wikitnow config init-ignore
 
 # Force overwrite if file already exists

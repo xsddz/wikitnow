@@ -23,10 +23,15 @@ type treeNode struct {
 }
 
 type uploadConfig struct {
-	filePath        string
-	fileName        string
-	spaceID         string
-	parentNodeToken string
+	filePath         string
+	fileName         string
+	spaceID          string
+	parentNodeToken  string
+	existingObjToken string // 非空表示更新已有文档（复用远端节点），否则新建
+	// 父目录重建所需（仅当父节点为目录时填充，用于父节点失效时自动重建）
+	parentDirRelPath string // 父目录相对路径（用于更新 mapping）
+	parentDirName    string // 父目录名称（用于 CreateDir）
+	grandParentToken string // 祖父节点 token（用于 CreateDir 的父节点）
 }
 
 // Engine 负责执行主同步任务
@@ -41,14 +46,14 @@ type Engine struct {
 
 // NewEngine 初始化一个新引擎
 func NewEngine(p provider.Provider, baseDir string, dryRun bool, useCodeBlock bool) *Engine {
-	mapping := LoadMappingStore(baseDir)
+	mapping, anchorDir := LoadMappingStore(baseDir)
 	return &Engine{
 		provider:     p,
-		ignorer:      NewIgnorer(baseDir),
+		ignorer:      NewIgnorer(anchorDir),
 		dryRun:       dryRun,
 		useCodeBlock: useCodeBlock,
 		mapping:      mapping,
-		baseDir:      baseDir,
+		baseDir:      anchorDir,
 	}
 }
 
@@ -123,7 +128,7 @@ func (e *Engine) collectNodes(localPath, spaceID, parentNodeToken string) ([]*tr
 		// 无论目录状态如何，都显示其子文件列表，让用户能看到具体的文件状态
 		err = e.buildDirTree(localPath, spaceID, parentNodeToken, "", &nodes)
 	} else {
-		err = e.buildFileNode(localPath, spaceID, parentNodeToken, "", &nodes)
+		err = e.buildFileNode(localPath, spaceID, parentNodeToken, "", &nodes, "", "", "")
 	}
 	return nodes, err
 }
@@ -208,7 +213,7 @@ func (e *Engine) hasEffectiveContent(dirPath string) bool {
 	return false
 }
 
-func (e *Engine) buildFileNode(filePath, spaceID, parentNodeToken, prefix string, nodes *[]*treeNode) error {
+func (e *Engine) buildFileNode(filePath, spaceID, parentNodeToken, prefix string, nodes *[]*treeNode, parentDirRelPath, parentDirName, grandParentToken string) error {
 	info, err := os.Stat(filePath)
 	if err != nil {
 		return err
@@ -239,12 +244,19 @@ func (e *Engine) buildFileNode(filePath, spaceID, parentNodeToken, prefix string
 	}
 
 	if status == "✅ 将同步" {
-		node.originalCfg = &uploadConfig{
-			filePath:        filePath,
-			fileName:        info.Name(),
-			spaceID:         spaceID,
-			parentNodeToken: parentNodeToken,
+		cfg := &uploadConfig{
+			filePath:         filePath,
+			fileName:         info.Name(),
+			spaceID:          spaceID,
+			parentNodeToken:  parentNodeToken,
+			parentDirRelPath: parentDirRelPath,
+			parentDirName:    parentDirName,
+			grandParentToken: grandParentToken,
 		}
+		if oldRecord != nil {
+			cfg.existingObjToken = oldRecord.ObjToken
+		}
+		node.originalCfg = cfg
 	}
 
 	*nodes = append(*nodes, node)
@@ -260,17 +272,27 @@ func (e *Engine) buildDirTree(dirPath, spaceID, parentNodeToken, prefix string, 
 	if e.dryRun {
 		dirNodeToken = "dry-run-token"
 	} else {
-		// 在遍历提取时，创建远端目录节点
-		resNode, err := e.provider.CreateDir(spaceID, parentNodeToken, dirName)
-		if err != nil {
-			return fmt.Errorf("建立远端目录节点失败 %s: %w", dirName, err)
-		}
-		dirNodeToken = resNode.ID
-		dirObjToken = resNode.ObjToken
-
-		// 记录目录映射
 		relPath, _ := filepath.Rel(e.baseDir, dirPath)
-		e.mapping.AddOrUpdate(relPath, dirNodeToken, dirObjToken, true, "")
+		oldRecord := e.mapping.GetByLocalPath(relPath)
+
+		if oldRecord != nil {
+			// ① 目录已有映射（之前已创建），复用已有 token，不重复调用 CreateDir
+			dirNodeToken = oldRecord.NodeToken
+			dirObjToken = oldRecord.ObjToken
+		} else if e.hasEffectiveContent(dirPath) {
+			// ② 新目录且有内容需要同步，创建远端节点并记录映射
+			resNode, err := e.provider.CreateDir(spaceID, parentNodeToken, dirName)
+			if err != nil {
+				return fmt.Errorf("建立远端目录节点失败 %s: %w", dirName, err)
+			}
+			dirNodeToken = resNode.ID
+			dirObjToken = resNode.ObjToken
+			e.mapping.AddOrUpdate(relPath, dirNodeToken, dirObjToken, true, "")
+		} else {
+			// ③ 无映射且无有效内容（全部已同步或被忽略），跳过 CreateDir
+			// 子文件同样不会上传，dirNodeToken 退化为父节点 token 仅供遍历展示
+			dirNodeToken = parentNodeToken
+		}
 	}
 
 	entries, err := os.ReadDir(dirPath)
@@ -309,7 +331,8 @@ func (e *Engine) buildDirTree(dirPath, spaceID, parentNodeToken, prefix string, 
 				fmt.Printf("❌ 获取分支目录失败 %s: %v\n", childPath, err)
 			}
 		} else {
-			e.buildFileNode(childPath, spaceID, dirNodeToken, currentPrefix, nodes)
+			parentDirRelPath, _ := filepath.Rel(e.baseDir, dirPath)
+			e.buildFileNode(childPath, spaceID, dirNodeToken, currentPrefix, nodes, parentDirRelPath, dirName, parentNodeToken)
 		}
 	}
 
@@ -321,17 +344,36 @@ func (e *Engine) uploadSingleFile(cfg *uploadConfig) error {
 		return nil
 	}
 
+	relPath, _ := filepath.Rel(e.baseDir, cfg.filePath)
+	fileHash, _ := ComputeFileHash(cfg.filePath)
+
+	if cfg.existingObjToken != "" {
+		// 文件已存在映射且内容已变更：清空并重写远端文档，保持节点不变
+		if err := e.provider.UpdateDocument(cfg.existingObjToken, cfg.filePath, cfg.fileName, e.useCodeBlock); err == nil {
+			// 只更新哈希，NodeToken/ObjToken 不变
+			oldRecord := e.mapping.GetByLocalPath(relPath)
+			if oldRecord != nil {
+				e.mapping.AddOrUpdate(relPath, oldRecord.NodeToken, oldRecord.ObjToken, false, fileHash)
+			}
+			return nil
+		}
+		// 更新失败（远端文档已被删除等），降级为新建
+	}
+
+	// 新建文档（首次同步，或远端已删除后降级重建）
 	remoteNode, err := e.provider.CreateDocument(cfg.spaceID, cfg.parentNodeToken, cfg.filePath, cfg.fileName, e.useCodeBlock)
+	if err != nil && cfg.parentDirName != "" {
+		// 父目录节点可能已失效，尝试重建父目录后重试
+		newDir, dirErr := e.provider.CreateDir(cfg.spaceID, cfg.grandParentToken, cfg.parentDirName)
+		if dirErr == nil {
+			e.mapping.AddOrUpdate(cfg.parentDirRelPath, newDir.ID, newDir.ObjToken, true, "")
+			remoteNode, err = e.provider.CreateDocument(cfg.spaceID, newDir.ID, cfg.filePath, cfg.fileName, e.useCodeBlock)
+		}
+	}
 	if err != nil {
 		return err
 	}
-
-	// 计算文件哈希并保存
-	fileHash, _ := ComputeFileHash(cfg.filePath)
-
-	relPath, _ := filepath.Rel(e.baseDir, cfg.filePath)
 	e.mapping.AddOrUpdate(relPath, remoteNode.ID, remoteNode.ObjToken, false, fileHash)
-
 	return nil
 }
 

@@ -330,3 +330,37 @@ func (c *Client) PatchDocumentBlock(docToken, blockToken string, payload map[str
 	}
 	return nil
 }
+
+// DeleteDocumentBlockChildren 按索引范围删除根块的直接子块。
+// startIndex、endIndex 为半开区间 [start, end)，对应飞书 API 语义。
+func (c *Client) DeleteDocumentBlockChildren(docToken string, startIndex, endIndex int) error {
+	apiURL := fmt.Sprintf("%s/documents/%s/blocks/%s/children/batch_delete", docxAPIBase, docToken, docToken)
+
+	payload := map[string]interface{}{
+		"start_index": startIndex,
+		"end_index":   endIndex,
+	}
+
+	err := retryOnRateLimit(5, func() error {
+		resp, err := c.resty.R().
+			SetBody(payload).
+			Delete(apiURL)
+		return parseResponse(resp, err)
+	})
+	if err != nil {
+		return fmt.Errorf("DeleteDocumentBlockChildren failed: %w", err)
+	}
+	return nil
+}
+
+// ClearDocumentContent 清空文档的全部内容块（保留文档节点本身）。
+func (c *Client) ClearDocumentContent(docToken string) error {
+	children, err := c.ListBlockChildren(docToken, docToken)
+	if err != nil {
+		return fmt.Errorf("ClearDocumentContent: list children failed: %w", err)
+	}
+	if len(children) == 0 {
+		return nil
+	}
+	return c.DeleteDocumentBlockChildren(docToken, 0, len(children))
+}

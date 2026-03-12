@@ -91,6 +91,25 @@ func (p *FeishuProvider) CreateDocument(spaceID, parentID, filePath, fileName st
 	}, nil
 }
 
+// UpdateDocument 清空并重写已有文档的全部内容（复用已有写入逻辑）。
+func (p *FeishuProvider) UpdateDocument(objToken, filePath, fileName string, useCodeBlock bool) error {
+	if err := p.client.ClearDocumentContent(objToken); err != nil {
+		return fmt.Errorf("清空文档内容失败: %w", err)
+	}
+
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	if useCodeBlock {
+		return p.client.InsertCodeBlock(objToken, string(content))
+	} else if p.isMarkdown(fileName) {
+		return p.uploadMarkdownAsBlocks(objToken, filePath, string(content))
+	}
+	return p.client.InsertTextBlock(objToken, string(content))
+}
+
 func (p *FeishuProvider) isMarkdown(filename string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
 	return ext == ".md" || ext == ".markdown"

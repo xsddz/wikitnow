@@ -9,6 +9,39 @@ REPO="xsddz/wikitnow"
 BIN_NAME="wikitnow"
 INSTALL_DIR="/usr/local/bin"
 
+# ── 卸载 ─────────────────────────────────────────────────────────────────────
+if [ "$1" = "uninstall" ]; then
+  echo "Uninstalling $BIN_NAME..."
+
+  # 删除二进制
+  BIN_PATH="$INSTALL_DIR/$BIN_NAME"
+  if [ -f "$BIN_PATH" ]; then
+    if [ -w "$INSTALL_DIR" ]; then
+      rm -f "$BIN_PATH"
+    else
+      sudo rm -f "$BIN_PATH"
+    fi
+    echo "✅ Removed binary: $BIN_PATH"
+  else
+    echo "   Binary not found: $BIN_PATH (skipped)"
+  fi
+
+  # 删除家目录配置目录
+  HOME_CONFIG="$HOME/.wikitnow"
+  if [ -d "$HOME_CONFIG" ]; then
+    rm -rf "$HOME_CONFIG"
+    echo "✅ Removed config dir: $HOME_CONFIG"
+  else
+    echo "   Config dir not found: $HOME_CONFIG (skipped)"
+  fi
+
+  echo ""
+  echo "$BIN_NAME uninstalled."
+  exit 0
+fi
+
+# ── 安装 ─────────────────────────────────────────────────────────────────────
+
 # Detect OS and architecture
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
@@ -56,27 +89,9 @@ else
     exit 1
 fi
 
-# Install system-level default ignore rules
-SYSTEM_CONFIG_DIR="/usr/local/etc/wikitnow"
-SYSTEM_IGNORE_FILE="$SYSTEM_CONFIG_DIR/ignore"
-
-echo "Installing system-level default ignore rules to $SYSTEM_IGNORE_FILE..."
-if [ -w "$SYSTEM_CONFIG_DIR" ] 2>/dev/null || sudo mkdir -p "$SYSTEM_CONFIG_DIR" 2>/dev/null; then
-    if [ -w "$SYSTEM_CONFIG_DIR" ]; then
-        mkdir -p "$SYSTEM_CONFIG_DIR"
-        "$INSTALL_DIR/$BIN_NAME" config init-ignore --dest "$SYSTEM_IGNORE_FILE" --force
-    else
-        sudo mkdir -p "$SYSTEM_CONFIG_DIR"
-        sudo "$INSTALL_DIR/$BIN_NAME" config init-ignore --dest "$SYSTEM_IGNORE_FILE" --force
-    fi
-    echo "   System ignore config: $SYSTEM_IGNORE_FILE"
-else
-    echo "   Warning: Cannot create $SYSTEM_CONFIG_DIR, skipping system-level config."
-fi
-
 echo "✅ $BIN_NAME installed successfully!"
-echo "   Binary:        $INSTALL_DIR/$BIN_NAME"
-echo "   System config: $SYSTEM_IGNORE_FILE"
+echo "   Binary: $INSTALL_DIR/$BIN_NAME"
 echo ""
 echo "Run '$BIN_NAME -h' to get started."
-echo "To customize ignore rules, run: $BIN_NAME config init-ignore"
+echo "To set up ignore rules, run: $BIN_NAME config init-ignore --dest ~/.wikitnow/ignore"
+echo "To uninstall, run: curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/install.sh | bash -s uninstall"
