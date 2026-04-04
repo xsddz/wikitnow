@@ -143,9 +143,9 @@ func (e *Engine) collectNodes(localPath, spaceID, parentNodeToken string) ([]*tr
 			isDir:      true,
 		})
 		// 无论目录状态如何，都显示其子文件列表，让用户能看到具体的文件状态
-		err = e.buildDirTree(absPath, spaceID, parentNodeToken, "", &nodes, nil)
+		err = e.buildDirTree(absPath, spaceID, parentNodeToken, "", &nodes, nil, false)
 	} else {
-		err = e.buildFileNode(absPath, spaceID, parentNodeToken, "", &nodes, nil)
+		err = e.buildFileNode(absPath, spaceID, parentNodeToken, "", &nodes, nil, false)
 	}
 	return nodes, err
 }
@@ -245,14 +245,26 @@ func (e *Engine) computeHasEffectiveContent(dirPath string) bool {
 	return false
 }
 
-func (e *Engine) buildFileNode(filePath, spaceID, parentNodeToken, prefix string, nodes *[]*treeNode, ancestors []ancestorDir) error {
+func (e *Engine) buildFileNode(filePath, spaceID, parentNodeToken, prefix string, nodes *[]*treeNode, ancestors []ancestorDir, ignored bool) error {
 	info, err := os.Stat(filePath)
 	if err != nil {
 		return err
 	}
 
-	status := e.getFileStatus(filePath)
 	display := prefix + info.Name()
+
+	// 若父目录已被忽略，子文件也级联标记为忽略，跳过所有上传逻辑
+	if ignored {
+		*nodes = append(*nodes, &treeNode{
+			displayStr: display,
+			displayLen: displayWidth(display),
+			statusStr:  "🚫 忽略",
+			isDir:      false,
+		})
+		return nil
+	}
+
+	status := e.getFileStatus(filePath)
 
 	node := &treeNode{
 		displayStr: display,
@@ -293,7 +305,7 @@ func (e *Engine) buildFileNode(filePath, spaceID, parentNodeToken, prefix string
 	return nil
 }
 
-func (e *Engine) buildDirTree(dirPath, spaceID, parentNodeToken, prefix string, nodes *[]*treeNode, ancestors []ancestorDir) error {
+func (e *Engine) buildDirTree(dirPath, spaceID, parentNodeToken, prefix string, nodes *[]*treeNode, ancestors []ancestorDir, ignored bool) error {
 	dirName := filepath.Base(dirPath)
 	relPath, _ := filepath.Rel(e.baseDir, dirPath)
 
@@ -306,7 +318,10 @@ func (e *Engine) buildDirTree(dirPath, spaceID, parentNodeToken, prefix string, 
 
 	var dirNodeToken string
 
-	if e.dryRun {
+	if ignored {
+		// 目录被忽略，不创建远端节点，仅供展示遍历
+		dirNodeToken = parentNodeToken
+	} else if e.dryRun {
 		dirNodeToken = "dry-run-token"
 	} else {
 		oldRecord := e.mapping.GetByLocalPath(relPath)
@@ -350,7 +365,16 @@ func (e *Engine) buildDirTree(dirPath, spaceID, parentNodeToken, prefix string, 
 		display := currentPrefix + entry.Name()
 
 		if entry.IsDir() {
-			status := e.getDirStatus(childPath)
+			var status string
+			var childIgnored bool
+			if ignored {
+				// 父目录已忽略，子目录级联忽略
+				status = "🚫 忽略"
+				childIgnored = true
+			} else {
+				status = e.getDirStatus(childPath)
+				childIgnored = (status == "🚫 忽略")
+			}
 			node := &treeNode{
 				displayStr: display,
 				displayLen: displayWidth(display),
@@ -360,12 +384,12 @@ func (e *Engine) buildDirTree(dirPath, spaceID, parentNodeToken, prefix string, 
 			*nodes = append(*nodes, node)
 
 			// 无论子目录状态如何，都递归显示其内容，让用户看到完整的文件树
-			if err := e.buildDirTree(childPath, spaceID, dirNodeToken, nextPrefix, nodes, ancestorsForChildren); err != nil {
+			if err := e.buildDirTree(childPath, spaceID, dirNodeToken, nextPrefix, nodes, ancestorsForChildren, childIgnored); err != nil {
 				// 仅记录到终端防崩溃
 				fmt.Printf("❌ 获取分支目录失败 %s: %v\n", childPath, err)
 			}
 		} else {
-			e.buildFileNode(childPath, spaceID, dirNodeToken, currentPrefix, nodes, ancestorsForChildren)
+			e.buildFileNode(childPath, spaceID, dirNodeToken, currentPrefix, nodes, ancestorsForChildren, ignored)
 		}
 	}
 

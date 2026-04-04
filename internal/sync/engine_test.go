@@ -229,7 +229,7 @@ func TestBuildFileNode(t *testing.T) {
 		e, dir := newTestEngine(t, &mockProvider{}, true)
 		p := writeFile(t, dir, "a.md", "hello")
 		var nodes []*treeNode
-		err := e.buildFileNode(p, "space1", "parent1", "", &nodes, nil)
+		err := e.buildFileNode(p, "space1", "parent1", "", &nodes, nil, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -251,7 +251,7 @@ func TestBuildFileNode(t *testing.T) {
 		e, dir := newTestEngine(t, &mockProvider{}, true)
 		p := writeFile(t, dir, ".hidden", "secret")
 		var nodes []*treeNode
-		e.buildFileNode(p, "space1", "parent1", "", &nodes, nil)
+		e.buildFileNode(p, "space1", "parent1", "", &nodes, nil, false)
 		if len(nodes) != 1 {
 			t.Fatalf("期望 1 个节点，实际 %d", len(nodes))
 		}
@@ -268,7 +268,7 @@ func TestBuildFileNode(t *testing.T) {
 		e.mapping.AddOrUpdate(relPath, "node-b", "obj-b", false, hash)
 
 		var nodes []*treeNode
-		e.buildFileNode(p, "space1", "parent1", "", &nodes, nil)
+		e.buildFileNode(p, "space1", "parent1", "", &nodes, nil, false)
 		if nodes[0].statusStr != "⏭️  已同步" {
 			t.Errorf("got %q, want '⏭️  已同步'", nodes[0].statusStr)
 		}
@@ -284,7 +284,7 @@ func TestBuildFileNode(t *testing.T) {
 		e.mapping.AddOrUpdate(relPath, "node-c", "obj-c", false, "sha256:oldhash")
 
 		var nodes []*treeNode
-		e.buildFileNode(p, "space1", "parent1", "", &nodes, nil)
+		e.buildFileNode(p, "space1", "parent1", "", &nodes, nil, false)
 		if nodes[0].originalCfg == nil {
 			t.Fatal("期望 originalCfg 不为 nil")
 		}
@@ -300,7 +300,7 @@ func TestBuildFileNode(t *testing.T) {
 			{relPath: "sub", name: "sub", parentToken: "root-token"},
 		}
 		var nodes []*treeNode
-		e.buildFileNode(p, "space1", "parent1", "", &nodes, ancestors)
+		e.buildFileNode(p, "space1", "parent1", "", &nodes, ancestors, false)
 		if nodes[0].originalCfg == nil {
 			t.Fatal("期望 originalCfg 不为 nil")
 		}
@@ -550,6 +550,32 @@ func TestUploadSingleFile(t *testing.T) {
 	})
 }
 
+// ─── TestIgnoredDirCascade ────────────────────────────────────────────────────
+
+func TestIgnoredDirCascade(t *testing.T) {
+	// 被忽略目录下的文件也应显示为 "🚫 忽略"，不产生 originalCfg
+	e, dir := newTestEngine(t, &mockProvider{}, true)
+	// 创建隐藏目录（以 . 开头，硬性规则忽略）及其内部的普通文件
+	writeFile(t, dir, ".hiddendir/readme.md", "should be ignored")
+	writeFile(t, dir, ".hiddendir/sub/doc.md", "also ignored")
+
+	hiddenDir := filepath.Join(dir, ".hiddendir")
+	var nodes []*treeNode
+	// ignored=true 模拟父目录已标记为忽略时的递归展示
+	if err := e.buildDirTree(hiddenDir, "space1", "parent1", "", &nodes, nil, true); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, n := range nodes {
+		if n.statusStr != "🚫 忽略" {
+			t.Errorf("节点 %q 状态应为 '🚫 忽略'，实际 %q", n.displayStr, n.statusStr)
+		}
+		if n.originalCfg != nil {
+			t.Errorf("节点 %q 不应生成 originalCfg（不应上传）", n.displayStr)
+		}
+	}
+}
+
 // ─── TestCollectNodes_PathNormalization ───────────────────────────────────────
 
 func TestCollectNodes_PathNormalization(t *testing.T) {
@@ -567,8 +593,8 @@ func TestCollectNodes_PathNormalization(t *testing.T) {
 
 	var nodesRel, nodesAbs []*treeNode
 
-	errRel := e.buildDirTree("sub", "space1", "parent1", "", &nodesRel, nil)
-	errAbs := e.buildDirTree(absSubDir, "space1", "parent1", "", &nodesAbs, nil)
+	errRel := e.buildDirTree("sub", "space1", "parent1", "", &nodesRel, nil, false)
+	errAbs := e.buildDirTree(absSubDir, "space1", "parent1", "", &nodesAbs, nil, false)
 
 	if errRel != nil {
 		t.Fatalf("relpath buildDirTree error: %v", errRel)

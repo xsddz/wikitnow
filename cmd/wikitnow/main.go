@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/xsddz/wikitnow/internal/auth"
@@ -18,7 +19,18 @@ import (
 	"github.com/xsddz/wikitnow/internal/sync"
 )
 
+// 以下变量由构建时通过 -ldflags 注入；直接 go run 时均退为默认值。
+var (
+	Version   = "dev"
+	Commit    = "unknown"
+	BuildDate = "unknown"
+)
+
 func main() {
+	// 支持 --version / -version 快捷 flag
+	showVersion := flag.Bool("version", false, "显示版本信息")
+	flag.BoolVar(showVersion, "v", false, "显示版本信息（简写）")
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "用法: %s <命令> [参数] [flags]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "命令:\n")
@@ -26,7 +38,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  pull      从知识库获取文档为 Markdown 文件\n")
 		fmt.Fprintf(os.Stderr, "  auth      管理平台凭证\n")
 		fmt.Fprintf(os.Stderr, "  provider  查看支持的知识库平台\n")
-		fmt.Fprintf(os.Stderr, "  config    配置管理\n\n")
+		fmt.Fprintf(os.Stderr, "  config    配置管理\n")
+		fmt.Fprintf(os.Stderr, "  version   显示版本信息\n\n")
 		fmt.Fprintf(os.Stderr, "示例:\n")
 		fmt.Fprintf(os.Stderr, "  %s sync ./docs                                               # 安全预览本地结构\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s sync ./docs --target https://your-wiki-url                # 执行真实推送\n", os.Args[0])
@@ -42,6 +55,12 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("wikitnow %s\n", Version)
+		return
+	}
+
 	args := flag.Args()
 
 	if len(args) < 1 {
@@ -60,11 +79,22 @@ func main() {
 		runSync(args[1:])
 	case "pull":
 		runPull(args[1:])
+	case "version":
+		runVersion()
 	default:
 		fmt.Fprintf(os.Stderr, "❌ 未知命令: %s\n\n", args[0])
 		flag.Usage()
 		os.Exit(1)
 	}
+}
+
+// runVersion 输出完整版本信息
+func runVersion() {
+	fmt.Printf("wikitnow %s\n", Version)
+	fmt.Printf("  Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	fmt.Printf("  Go:       %s\n", runtime.Version())
+	fmt.Printf("  Commit:   %s\n", Commit)
+	fmt.Printf("  Built:    %s\n", BuildDate)
 }
 
 // syncOpts 存放 sync 子命令解析后的全部参数。
