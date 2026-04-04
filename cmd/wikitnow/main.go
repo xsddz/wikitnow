@@ -186,8 +186,8 @@ func runSync(args []string) {
 		fmt.Printf("📁 目标知识库 Space ID: %s\n\n", spaceID)
 	}
 
-	// 使用 "." (CWD) 作为 ignorer 的基准目录，以统一处理多路径场景
-	engine := sync.NewEngine(prov, ".", !apply, opts.useCodeBlock)
+	// 以同步目标路径的绝对公共祖先作为锚定根，确保 mapping/ignore 与 cwd 无关
+	engine := sync.NewEngine(prov, resolveBaseDir(opts.localPaths), !apply, opts.useCodeBlock)
 	if err := engine.SyncAll(opts.localPaths, spaceID, parentNodeToken); err != nil {
 		fmt.Printf("❌ 同步中断: %v\n", err)
 		os.Exit(1)
@@ -198,6 +198,50 @@ func runSync(args []string) {
 	} else {
 		fmt.Println("\n✅ 同步完成")
 	}
+}
+
+// resolveBaseDir 将本地路径列表解析为绝对公共祖先目录，
+// 作为 Engine 的锚定根，确保 mapping/ignore 文件路径与运行时 cwd 无关。
+func resolveBaseDir(localPaths []string) string {
+	dirs := make([]string, 0, len(localPaths))
+	for _, p := range localPaths {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			return "."
+		}
+		// 若路径指向文件，取其父目录
+		if info, err := os.Stat(abs); err == nil && !info.IsDir() {
+			abs = filepath.Dir(abs)
+		}
+		dirs = append(dirs, abs)
+	}
+	if len(dirs) == 0 {
+		return "."
+	}
+	base := dirs[0]
+	for _, d := range dirs[1:] {
+		base = commonDirAncestor(base, d)
+	}
+	return base
+}
+
+// commonDirAncestor 返回两个绝对目录路径的最长公共祖先目录。
+func commonDirAncestor(a, b string) string {
+	sep := string(filepath.Separator)
+	pa := strings.Split(filepath.Clean(a), sep)
+	pb := strings.Split(filepath.Clean(b), sep)
+	var common []string
+	for i := 0; i < len(pa) && i < len(pb); i++ {
+		if pa[i] == pb[i] {
+			common = append(common, pa[i])
+		} else {
+			break
+		}
+	}
+	if len(common) == 0 {
+		return sep
+	}
+	return strings.Join(common, sep)
 }
 
 // validateWikiURL 对 Wiki URL 做基础合法性校验，在调用远端 API 之前拦截明显错误。
