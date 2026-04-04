@@ -18,6 +18,7 @@ type MappingStore struct {
 	RootNodeToken string          `json:"root_node_token"`
 	SyncedAt      time.Time       `json:"synced_at"`
 	Mappings      []MappingRecord `json:"mappings"`
+	index         map[string]int  // local_path → Mappings 切片索引；不序列化
 }
 
 // MappingRecord 单个本地文件与远端节点的映射
@@ -62,6 +63,7 @@ func LoadMappingStore(workingDir string) (*MappingStore, string) {
 		}, anchorDir
 	}
 
+	store.rebuildIndex()
 	return &store, anchorDir
 }
 
@@ -84,8 +86,15 @@ func (s *MappingStore) Save(workingDir string) error {
 	return os.WriteFile(mappingPath, data, 0644)
 }
 
-// GetByLocalPath 根据本地路径查找映射
+// GetByLocalPath 根据本地路径查找映射（O(1) 索引查找）
 func (s *MappingStore) GetByLocalPath(localPath string) *MappingRecord {
+	if s.index != nil {
+		if i, ok := s.index[localPath]; ok {
+			return &s.Mappings[i]
+		}
+		return nil
+	}
+	// index 尚未建立（空库兼容），回退线性扫描
 	for i := range s.Mappings {
 		if s.Mappings[i].LocalPath == localPath {
 			return &s.Mappings[i]
@@ -94,18 +103,27 @@ func (s *MappingStore) GetByLocalPath(localPath string) *MappingRecord {
 	return nil
 }
 
+// rebuildIndex 从当前 Mappings 切片重建内存索引
+func (s *MappingStore) rebuildIndex() {
+	s.index = make(map[string]int, len(s.Mappings))
+	for i, rec := range s.Mappings {
+		s.index[rec.LocalPath] = i
+	}
+}
+
 // AddOrUpdate 添加或更新映射
 func (s *MappingStore) AddOrUpdate(localPath, nodeToken, objToken string, isDir bool, fileHash string) {
-	for i := range s.Mappings {
-		if s.Mappings[i].LocalPath == localPath {
-			s.Mappings[i].NodeToken = nodeToken
-			s.Mappings[i].ObjToken = objToken
-			s.Mappings[i].IsDir = isDir
-			s.Mappings[i].FileHash = fileHash
-			return
-		}
+	if s.index == nil {
+		s.index = make(map[string]int)
 	}
-
+	if i, ok := s.index[localPath]; ok {
+		s.Mappings[i].NodeToken = nodeToken
+		s.Mappings[i].ObjToken = objToken
+		s.Mappings[i].IsDir = isDir
+		s.Mappings[i].FileHash = fileHash
+		return
+	}
+	idx := len(s.Mappings)
 	s.Mappings = append(s.Mappings, MappingRecord{
 		LocalPath: localPath,
 		NodeToken: nodeToken,
@@ -113,11 +131,13 @@ func (s *MappingStore) AddOrUpdate(localPath, nodeToken, objToken string, isDir 
 		IsDir:     isDir,
 		FileHash:  fileHash,
 	})
+	s.index[localPath] = idx
 }
 
 // Clear 清空所有映射（切换 target 时使用）
 func (s *MappingStore) Clear() {
 	s.Mappings = []MappingRecord{}
+	s.index = make(map[string]int)
 }
 
 // UpdateMetadata 更新知识库信息
@@ -187,21 +207,30 @@ func findFileUpward(baseDir, relPath string) string {
 }
 
 // findMappingFile 按优先级查找映射文件位置，同时返回锚定目录（anchorDir）：
-//   - anchorDir 是计算 local_path 相对路径的基准根，确保无论从哪个子目录运行
-//     relPath 都保持一致，不会因 baseDir 不同而产生键冲突或重复条目。
+//   - anchorDir 始终是绝对路径，是计算 local_path 相对路径的基准根，
+//     确保无论从哪个子目录运行、使用相对还是绝对路径输入，relPath 都保持一致。
 //
 // 1. 从工作目录向上查找 .wikitnow/mapping.json（与 ignore 查找机制一致）
 //   - mappingPath = 找到的文件路径
-//   - anchorDir  = 含有 .wikitnow/ 的目录（即 `filepath.Dir(filepath.Dir(path))`）
+//   - anchorDir  = 含有 .wikitnow/ 的目录（绝对路径）
 //
 // 2. 家目录 ~/.wikitnow/mappings/{projectHash}.json（最终兜底）
-//   - anchorDir  = workingDir（每个工作目录独享一个哈希文件，天然隔离）
+//   - anchorDir  = workingDir 的绝对路径（每个工作目录独享一个哈希文件，天然隔离）
 func findMappingFile(workingDir string) (string, string) {
+	// 获取工作目录的绝对路径（后续两个分支都需要）
+	absWorkingDir, err := filepath.Abs(workingDir)
+	if err != nil {
+		absWorkingDir = workingDir
+	}
+
 	// 1. 从工作目录向上查找已存在的项目级映射
 	if workingDir != "" {
 		if path := findFileUpward(workingDir, ".wikitnow/mapping.json"); path != "" {
-			// anchorDir = 包含 .wikitnow/ 的目录
+			// anchorDir = 包含 .wikitnow/ 的目录，规范化为绝对路径
 			anchorDir := filepath.Dir(filepath.Dir(path))
+			if absAnchor, err := filepath.Abs(anchorDir); err == nil {
+				anchorDir = absAnchor
+			}
 			return path, anchorDir
 		}
 	}
@@ -209,17 +238,11 @@ func findMappingFile(workingDir string) (string, string) {
 	// 2. 家目录兜底：路径始终有效（Save 会按需创建目录和文件）
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", workingDir
+		return "", absWorkingDir
 	}
 
-	// 获取工作目录的绝对路径
-	absPath, err := filepath.Abs(workingDir)
-	if err != nil {
-		return "", workingDir
-	}
-
-	projectHash := getProjectHash(absPath)
-	return filepath.Join(home, ".wikitnow", "mappings", projectHash+".json"), workingDir
+	projectHash := getProjectHash(absWorkingDir)
+	return filepath.Join(home, ".wikitnow", "mappings", projectHash+".json"), absWorkingDir
 }
 
 // getOrCreateMappingDir 获取或创建映射文件的目录

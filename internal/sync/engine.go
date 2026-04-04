@@ -2,7 +2,6 @@ package sync
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,15 +10,20 @@ import (
 	"github.com/xsddz/wikitnow/internal/provider"
 )
 
-// TreeNode 用于在最终渲染前缓存渲染信息，以实现对齐填充
+// treeNode 用于在最终渲染前缓存渲染信息，以实现对齐填充
 type treeNode struct {
 	displayStr  string        // 前缀 + 文件名 (如 "├── main.go")
 	displayLen  int           // 显示字符长度（考虑中文字符）
 	statusStr   string        // 状态文本 (如 "✅ 将同步")
 	isDir       bool          // 是否为目录
-	hasError    bool          // 是否遇到了执行错误
-	errorMsg    string        // 具体的错误信息
 	originalCfg *uploadConfig // 携带给实际执行的闭包参数
+}
+
+// ancestorDir 记录一个目录的恢复信息，用于父节点失效时重建目录链
+type ancestorDir struct {
+	relPath     string // 相对 baseDir 的路径（用于更新 mapping）
+	name        string // 目录名称（用于 CreateDir）
+	parentToken string // 该目录父节点的 token（重建时作为 CreateDir 的父节点）
 }
 
 type uploadConfig struct {
@@ -28,10 +32,9 @@ type uploadConfig struct {
 	spaceID          string
 	parentNodeToken  string
 	existingObjToken string // 非空表示更新已有文档（复用远端节点），否则新建
-	// 父目录重建所需（仅当父节点为目录时填充，用于父节点失效时自动重建）
-	parentDirRelPath string // 父目录相对路径（用于更新 mapping）
-	parentDirName    string // 父目录名称（用于 CreateDir）
-	grandParentToken string // 祖父节点 token（用于 CreateDir 的父节点）
+	// 祖先目录链：[0] 是直接父目录，[1] 是祖父目录，以此类推
+	// 用于当父目录节点失效时，递归向上重建整条目录链
+	ancestors []ancestorDir
 }
 
 // Engine 负责执行主同步任务
@@ -42,6 +45,8 @@ type Engine struct {
 	useCodeBlock bool
 	mapping      *MappingStore
 	baseDir      string
+	// per-SyncAll 的 hasEffectiveContent 结果缓存，避免对同一目录重复遍历
+	contentCache map[string]bool
 }
 
 // NewEngine 初始化一个新引擎
@@ -65,6 +70,9 @@ func (e *Engine) Sync(localPath, spaceID, parentNodeToken string) error {
 // SyncAll 将多个本地路径的节点统一收集、全局对齐渲染，并执行上传。
 // 所有路径共享同一个 padWidth，保证跨路径列对齐。
 func (e *Engine) SyncAll(localPaths []string, spaceID, parentNodeToken string) error {
+	// 初始化 per-call 缓存（避免 hasEffectiveContent 在同一 SyncAll 中重复遍历）
+	e.contentCache = make(map[string]bool)
+
 	// 如果指定了 target（非 dry-run），检查并处理 target 变更
 	if !e.dryRun {
 		if e.mapping.HasDifferentTarget(spaceID, parentNodeToken) {
@@ -110,25 +118,34 @@ func (e *Engine) SyncAll(localPaths []string, spaceID, parentNodeToken string) e
 
 // collectNodes 从单个本地路径收集所有渲染节点。
 // 非 dryRun 模式下，目录节点会在此阶段调用 provider.CreateDir 建立远端节点。
+// 关键：将输入路径规范化为绝对路径后再操作，确保 filepath.Rel(e.baseDir, ...)
+// 始终能正确计算（e.baseDir 也是绝对路径），无论用户传入相对路径还是绝对路径行为完全一致。
 func (e *Engine) collectNodes(localPath, spaceID, parentNodeToken string) ([]*treeNode, error) {
-	info, err := os.Stat(localPath)
+	// 保留原始输入用于终端显示，规范化后的绝对路径用于所有 FS/映射操作
+	displayPath := localPath
+	absPath, err := filepath.Abs(localPath)
+	if err != nil {
+		return nil, fmt.Errorf("无法解析路径 %s: %w", localPath, err)
+	}
+
+	info, err := os.Stat(absPath)
 	if err != nil {
 		return nil, err
 	}
 
 	var nodes []*treeNode
 	if info.IsDir() {
-		dirStatus := e.getDirStatus(localPath)
+		dirStatus := e.getDirStatus(absPath)
 		nodes = append(nodes, &treeNode{
-			displayStr: localPath,
-			displayLen: displayWidth(localPath),
+			displayStr: displayPath,
+			displayLen: displayWidth(displayPath),
 			statusStr:  dirStatus,
 			isDir:      true,
 		})
 		// 无论目录状态如何，都显示其子文件列表，让用户能看到具体的文件状态
-		err = e.buildDirTree(localPath, spaceID, parentNodeToken, "", &nodes)
+		err = e.buildDirTree(absPath, spaceID, parentNodeToken, "", &nodes, nil)
 	} else {
-		err = e.buildFileNode(localPath, spaceID, parentNodeToken, "", &nodes, "", "", "")
+		err = e.buildFileNode(absPath, spaceID, parentNodeToken, "", &nodes, nil)
 	}
 	return nodes, err
 }
@@ -178,8 +195,23 @@ func (e *Engine) getDirStatus(dirPath string) string {
 	return "📁 将同步"
 }
 
-// hasEffectiveContent 递归检查一个目录是否有至少一个实际可同步的文件
+// hasEffectiveContent 递归检查一个目录是否有至少一个实际可同步的文件。
+// 结果会在 e.contentCache 中缓存，避免在同一 SyncAll 调用期间对同一目录重复遍历。
 func (e *Engine) hasEffectiveContent(dirPath string) bool {
+	if e.contentCache != nil {
+		if cached, ok := e.contentCache[dirPath]; ok {
+			return cached
+		}
+	}
+	result := e.computeHasEffectiveContent(dirPath)
+	if e.contentCache != nil {
+		e.contentCache[dirPath] = result
+	}
+	return result
+}
+
+// computeHasEffectiveContent 是 hasEffectiveContent 的实际计算逻辑（不含缓存）
+func (e *Engine) computeHasEffectiveContent(dirPath string) bool {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		return false
@@ -213,7 +245,7 @@ func (e *Engine) hasEffectiveContent(dirPath string) bool {
 	return false
 }
 
-func (e *Engine) buildFileNode(filePath, spaceID, parentNodeToken, prefix string, nodes *[]*treeNode, parentDirRelPath, parentDirName, grandParentToken string) error {
+func (e *Engine) buildFileNode(filePath, spaceID, parentNodeToken, prefix string, nodes *[]*treeNode, ancestors []ancestorDir) error {
 	info, err := os.Stat(filePath)
 	if err != nil {
 		return err
@@ -245,13 +277,11 @@ func (e *Engine) buildFileNode(filePath, spaceID, parentNodeToken, prefix string
 
 	if status == "✅ 将同步" {
 		cfg := &uploadConfig{
-			filePath:         filePath,
-			fileName:         info.Name(),
-			spaceID:          spaceID,
-			parentNodeToken:  parentNodeToken,
-			parentDirRelPath: parentDirRelPath,
-			parentDirName:    parentDirName,
-			grandParentToken: grandParentToken,
+			filePath:        filePath,
+			fileName:        info.Name(),
+			spaceID:         spaceID,
+			parentNodeToken: parentNodeToken,
+			ancestors:       ancestors,
 		}
 		if oldRecord != nil {
 			cfg.existingObjToken = oldRecord.ObjToken
@@ -263,22 +293,27 @@ func (e *Engine) buildFileNode(filePath, spaceID, parentNodeToken, prefix string
 	return nil
 }
 
-func (e *Engine) buildDirTree(dirPath, spaceID, parentNodeToken, prefix string, nodes *[]*treeNode) error {
+func (e *Engine) buildDirTree(dirPath, spaceID, parentNodeToken, prefix string, nodes *[]*treeNode, ancestors []ancestorDir) error {
 	dirName := filepath.Base(dirPath)
+	relPath, _ := filepath.Rel(e.baseDir, dirPath)
+
+	// 将当前目录信息前追到祖先链，供子文件/子目录的恢复逻辑使用
+	ancestorsForChildren := append([]ancestorDir{{
+		relPath:     relPath,
+		name:        dirName,
+		parentToken: parentNodeToken,
+	}}, ancestors...)
 
 	var dirNodeToken string
-	var dirObjToken string
 
 	if e.dryRun {
 		dirNodeToken = "dry-run-token"
 	} else {
-		relPath, _ := filepath.Rel(e.baseDir, dirPath)
 		oldRecord := e.mapping.GetByLocalPath(relPath)
 
 		if oldRecord != nil {
 			// ① 目录已有映射（之前已创建），复用已有 token，不重复调用 CreateDir
 			dirNodeToken = oldRecord.NodeToken
-			dirObjToken = oldRecord.ObjToken
 		} else if e.hasEffectiveContent(dirPath) {
 			// ② 新目录且有内容需要同步，创建远端节点并记录映射
 			resNode, err := e.provider.CreateDir(spaceID, parentNodeToken, dirName)
@@ -286,8 +321,7 @@ func (e *Engine) buildDirTree(dirPath, spaceID, parentNodeToken, prefix string, 
 				return fmt.Errorf("建立远端目录节点失败 %s: %w", dirName, err)
 			}
 			dirNodeToken = resNode.ID
-			dirObjToken = resNode.ObjToken
-			e.mapping.AddOrUpdate(relPath, dirNodeToken, dirObjToken, true, "")
+			e.mapping.AddOrUpdate(relPath, dirNodeToken, resNode.ObjToken, true, "")
 		} else {
 			// ③ 无映射且无有效内容（全部已同步或被忽略），跳过 CreateDir
 			// 子文件同样不会上传，dirNodeToken 退化为父节点 token 仅供遍历展示
@@ -326,13 +360,12 @@ func (e *Engine) buildDirTree(dirPath, spaceID, parentNodeToken, prefix string, 
 			*nodes = append(*nodes, node)
 
 			// 无论子目录状态如何，都递归显示其内容，让用户看到完整的文件树
-			if err := e.buildDirTree(childPath, spaceID, dirNodeToken, nextPrefix, nodes); err != nil {
+			if err := e.buildDirTree(childPath, spaceID, dirNodeToken, nextPrefix, nodes, ancestorsForChildren); err != nil {
 				// 仅记录到终端防崩溃
 				fmt.Printf("❌ 获取分支目录失败 %s: %v\n", childPath, err)
 			}
 		} else {
-			parentDirRelPath, _ := filepath.Rel(e.baseDir, dirPath)
-			e.buildFileNode(childPath, spaceID, dirNodeToken, currentPrefix, nodes, parentDirRelPath, dirName, parentNodeToken)
+			e.buildFileNode(childPath, spaceID, dirNodeToken, currentPrefix, nodes, ancestorsForChildren)
 		}
 	}
 
@@ -362,12 +395,11 @@ func (e *Engine) uploadSingleFile(cfg *uploadConfig) error {
 
 	// 新建文档（首次同步，或远端已删除后降级重建）
 	remoteNode, err := e.provider.CreateDocument(cfg.spaceID, cfg.parentNodeToken, cfg.filePath, cfg.fileName, e.useCodeBlock)
-	if err != nil && cfg.parentDirName != "" {
-		// 父目录节点可能已失效，尝试重建父目录后重试
-		newDir, dirErr := e.provider.CreateDir(cfg.spaceID, cfg.grandParentToken, cfg.parentDirName)
-		if dirErr == nil {
-			e.mapping.AddOrUpdate(cfg.parentDirRelPath, newDir.ID, newDir.ObjToken, true, "")
-			remoteNode, err = e.provider.CreateDocument(cfg.spaceID, newDir.ID, cfg.filePath, cfg.fileName, e.useCodeBlock)
+	if err != nil && len(cfg.ancestors) > 0 {
+		// 父目录节点可能已失效，递归重建目录链后重试
+		freshParentToken, rebuildErr := e.rebuildAncestors(cfg.spaceID, cfg.ancestors, 0)
+		if rebuildErr == nil {
+			remoteNode, err = e.provider.CreateDocument(cfg.spaceID, freshParentToken, cfg.filePath, cfg.fileName, e.useCodeBlock)
 		}
 	}
 	if err != nil {
@@ -377,9 +409,27 @@ func (e *Engine) uploadSingleFile(cfg *uploadConfig) error {
 	return nil
 }
 
-// Stat 检查前缀
-func Stat(path string) (fs.FileInfo, error) {
-	return os.Stat(path)
+// rebuildAncestors 递归重建目录链，返回 ancestors[idx] 目录的新 nodeToken。
+// 当某一层的 parentToken 也失效时，会先递归重建上一层，再用新 token 创建当前层。
+func (e *Engine) rebuildAncestors(spaceID string, ancestors []ancestorDir, idx int) (string, error) {
+	if idx >= len(ancestors) {
+		return "", fmt.Errorf("祖先链已耗尽，无法重建")
+	}
+	anc := ancestors[idx]
+	newDir, err := e.provider.CreateDir(spaceID, anc.parentToken, anc.name)
+	if err != nil {
+		// 当前层的 parentToken 也失效，尝试向上重建
+		freshParent, upErr := e.rebuildAncestors(spaceID, ancestors, idx+1)
+		if upErr != nil {
+			return "", fmt.Errorf("重建目录 %s 失败: %w", anc.name, err)
+		}
+		newDir, err = e.provider.CreateDir(spaceID, freshParent, anc.name)
+		if err != nil {
+			return "", fmt.Errorf("重建目录 %s 失败: %w", anc.name, err)
+		}
+	}
+	e.mapping.AddOrUpdate(anc.relPath, newDir.ID, newDir.ObjToken, true, "")
+	return newDir.ID, nil
 }
 
 // displayWidth 计算字符串在终端中的显示宽度，CJK 字符计为 2 列
